@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DNS Mars Data Telekomunikasi</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --neon-blue: #00f2ff;
+            --neon-purple: #bc13fe;
+            --dark-bg: #050b18;
+        }
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: var(--dark-bg);
+            background-image: 
+                radial-gradient(circle at 20% 30%, rgba(0, 242, 255, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 80% 70%, rgba(188, 19, 254, 0.05) 0%, transparent 40%);
+            color: #e2e8f0;
+            min-height: 100vh;
+        }
+        .font-orbitron { font-family: 'Orbitron', sans-serif; }
+        .glass { 
+            background: rgba(15, 23, 42, 0.6); 
+            backdrop-filter: blur(12px); 
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+        }
+        .status-on { color: var(--neon-blue); text-shadow: 0 0 8px rgba(0, 242, 255, 0.5); }
+        .status-off { color: #ef4444; text-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
+        .card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .card:hover { 
+            transform: translateY(-5px); 
+            border-color: var(--neon-blue);
+        }
+        pre { background: #0a0f1d; color: var(--neon-blue); border: 1px solid rgba(0, 242, 255, 0.1); font-size: 10px; line-height: 1.2; }
+        .progress-bar { height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, var(--neon-blue), var(--neon-purple)); transition: width 0.5s ease; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <header class="mb-8 flex flex-col lg:flex-row justify-between items-center gap-6">
+            <div class="flex items-center gap-4">
+                <div class="w-16 h-16 bg-white rounded-full p-1 flex items-center justify-center overflow-hidden shadow-[0_0_20px_rgba(255,255,255,0.1)]">
+                    <img src="/static/img/logo_mars.jpeg" alt="MARS Logo" onerror="this.src='https://api.dicebear.com/7.x/initials/svg?seed=MARS&backgroundColor=003399'" class="w-full h-full object-contain">
+                </div>
+                <div>
+                    <h1 class="text-2xl md:text-3xl font-bold font-orbitron tracking-wider text-white">PT MARS DATA TELEKOMUNIKASI</h1>
+                    <p class="text-blue-400 font-medium tracking-widest text-xs">DNS MARS DATA TELEKOMUNIKASI</p>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-3 gap-4 w-full lg:w-auto">
+                <div class="glass p-3 rounded-xl min-w-[110px]">
+                    <span class="text-[10px] uppercase text-slate-400 block mb-1">CPU</span>
+                    <div class="flex items-end gap-1"><span id="metric-cpu" class="text-xl font-orbitron text-white">0</span><span class="text-xs text-slate-500 mb-1">%</span></div>
+                    <div class="progress-bar mt-2"><div id="bar-cpu" class="progress-fill" style="width: 0%"></div></div>
+                </div>
+                <div class="glass p-3 rounded-xl min-w-[110px]">
+                    <span class="text-[10px] uppercase text-slate-400 block mb-1">RAM</span>
+                    <div class="flex items-end gap-1"><span id="metric-ram" class="text-xl font-orbitron text-white">0</span><span class="text-xs text-slate-500 mb-1">%</span></div>
+                    <div class="progress-bar mt-2"><div id="bar-ram" class="progress-fill" style="width: 0%"></div></div>
+                </div>
+                <div class="glass p-3 rounded-xl min-w-[110px]">
+                    <span class="text-[10px] uppercase text-slate-400 block mb-1">DNS</span>
+                    <div class="flex items-end gap-1"><span id="metric-perf" class="text-xl font-orbitron text-white">0</span><span class="text-xs text-slate-500 mb-1">%</span></div>
+                    <div class="progress-bar mt-2"><div id="bar-perf" class="progress-fill" style="width: 0%"></div></div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Layout -->
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            
+            <!-- Left Column: Status & Actions -->
+            <div class="lg:col-span-1 space-y-6">
+                <!-- Status -->
+                <div class="glass p-5 rounded-2xl space-y-4">
+                    <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2">SYSTEM STATUS</h2>
+                    <div class="grid grid-cols-1 gap-3">
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">DNSMASQ</span><span id="status-dnsmasq" class="text-xs font-orbitron">...</span></div>
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">UNBOUND</span><span id="status-unbound" class="text-xs font-orbitron">...</span></div>
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">GUARDIAN</span><span id="status-guardian" class="text-xs font-orbitron">...</span></div>
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">DDoS PROT</span><span id="status-security" class="text-xs font-orbitron">...</span></div>
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">NAT INTCP</span><span id="status-iptables" class="text-xs font-orbitron">...</span></div>
+                    </div>
+                </div>
+
+                <!-- Control Center -->
+                <div class="glass p-5 rounded-2xl space-y-3">
+                    <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2">CONTROL CENTER</h2>
+                    <div class="grid grid-cols-1 gap-2">
+                        <button onclick="doAction('restart_dnsmasq')" class="text-left px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl transition group">
+                            <span class="block text-[10px] text-slate-500 font-orbitron">SERVICE</span><span class="text-xs font-bold text-white">RESTART DNSMASQ</span>
+                        </button>
+                        <button onclick="doAction('restart_unbound')" class="text-left px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl transition group">
+                            <span class="block text-[10px] text-slate-500 font-orbitron">SERVICE</span><span class="text-xs font-bold text-white">RESTART UNBOUND</span>
+                        </button>
+                        <button onclick="doAction('malware_shield')" class="text-left px-4 py-3 bg-red-900/20 hover:bg-red-900/40 border border-red-500/30 rounded-xl transition group">
+                            <span class="block text-[10px] text-red-400 font-orbitron">PROTECTION</span><span class="text-xs font-bold text-white">MALWARE SHIELD</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Upstream DNS -->
+                <div class="glass p-5 rounded-2xl space-y-3">
+                    <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2">UPSTREAM DNS</h2>
+                    <div class="space-y-2">
+                        <input type="text" id="dns-ip-input" placeholder="e.g. 8.8.8.8" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-blue-500">
+                        <button onclick="changeDnsIp()" class="w-full py-2 bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/30 rounded-lg text-[10px] font-orbitron text-white transition">UPDATE UPSTREAM</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle Column: Traffic & Logs -->
+            <div class="lg:col-span-2 space-y-6">
+                <div class="glass p-6 rounded-2xl h-[400px]">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-sm font-orbitron text-white">TRAFFIC ANALYSIS</h2>
+                        <span class="text-[10px] text-blue-400 animate-pulse">● LIVE MONITORING</span>
+                    </div>
+                    <div class="h-[320px]"><canvas id="trafficChart"></canvas></div>
+                </div>
+
+                <div class="glass p-6 rounded-2xl hidden" id="guardian-logs-container">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-sm font-orbitron text-cyan-400">GUARDIAN AUTO-DEFENSE</h2>
+                        <span class="text-[10px] text-cyan-500 animate-pulse">SHIELD ACTIVE</span>
+                    </div>
+                    <pre id="guardian-logs" class="max-h-[100px] overflow-y-auto rounded-lg p-3 text-cyan-400 border-cyan-900/50 bg-cyan-950/20"></pre>
+                </div>
+
+                <div class="glass p-6 rounded-2xl">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-sm font-orbitron text-white">SYSTEM LOGS</h2>
+                        <button onclick="fetchLogs()" class="text-[10px] text-blue-400 hover:underline">REFRESH LOGS</button>
+                    </div>
+                    <pre id="logs-content" class="h-[150px] overflow-y-auto rounded-lg p-3">Waiting for logs...</pre>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <button onclick="doAction('update_ssh')" class="text-left px-4 py-3 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-500/30 rounded-xl transition group">
+                        <span class="block text-[10px] text-blue-400 font-orbitron">SECURITY</span><span class="text-xs font-bold text-white">UPDATE SSH</span>
+                    </button>
+                    <button onclick="doAction('update_firewall')" class="text-left px-4 py-3 bg-purple-900/20 hover:bg-purple-900/40 border border-purple-500/30 rounded-xl transition group">
+                        <span class="block text-[10px] text-purple-400 font-orbitron">SECURITY</span><span class="text-xs font-bold text-white">UPDATE FIREWALL</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Column: Query & Lists -->
+            <div class="lg:col-span-1 space-y-6">
+                <!-- Deep Query Test -->
+                <div class="glass p-5 rounded-2xl space-y-4">
+                    <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2">DEEP QUERY TEST</h2>
+                    <div class="space-y-3">
+                        <div class="flex gap-2">
+                            <input type="text" id="domain-input" placeholder="Enter domain..." class="flex-1 bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition">
+                            <select id="qtype-input" class="bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-2 text-[10px] text-white focus:outline-none">
+                                <option value="A">A</option>
+                                <option value="AAAA">AAAA</option>
+                                <option value="MX">MX</option>
+                                <option value="TXT">TXT</option>
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-1 gap-2">
+                            <button onclick="runDig()" id="dig-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-orbitron text-[10px] py-2 rounded-lg transition shadow-lg shadow-blue-900/20">EXECUTE QUERY</button>
+                            <div class="grid grid-cols-2 gap-2">
+                                <button onclick="doActionWithDomain('blacklist')" class="bg-red-900/40 hover:bg-red-900/60 text-red-400 border border-red-500/30 font-orbitron text-[10px] py-2 rounded-lg transition">BLACKLIST</button>
+                                <button onclick="doActionWithDomain('whitelist')" class="bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-500/30 font-orbitron text-[10px] py-2 rounded-lg transition">WHITELIST</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="dig-result-container" class="hidden"><pre id="dig-result" class="max-h-[150px] overflow-y-auto rounded-lg p-2 mt-2"></pre></div>
+                </div>
+
+                <!-- IPv6 Management -->
+                <div class="glass p-5 rounded-2xl space-y-4">
+                    <h2 class="text-sm font-orbitron text-purple-400 border-b border-white/10 pb-2">NETWORK MANAGEMENT</h2>
+                    
+                    <!-- IPv4 Section -->
+                    <div class="space-y-2">
+                        <span class="text-[10px] text-blue-400 font-orbitron">IPV4 CONFIGURATION</span>
+                        <input type="text" id="ip4-addr-input" placeholder="IP Address/Prefix (e.g. 103.68.213.74/30)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-blue-500">
+                        <input type="text" id="ip4-gw-input" placeholder="Gateway (e.g. 103.68.213.73)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <div class="border-t border-white/5 pt-2 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] text-purple-400 font-orbitron">IPV6 CONFIGURATION</span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="ipv6-toggle" onchange="toggleIpv6()" class="sr-only peer">
+                                <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                            </label>
+                        </div>
+                        <input type="text" id="ip6-addr-input" placeholder="IPv6 Address/Prefix" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-purple-500">
+                        <input type="text" id="ip6-gw-input" placeholder="IPv6 Gateway" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-purple-500">
+                    </div>
+
+                    <button onclick="updateNetwork()" class="w-full py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-orbitron text-[10px] rounded-lg transition shadow-lg">APPLY NETWORK CHANGES</button>
+                    <p class="text-[9px] text-red-400 text-center">Warning: Incorrect settings may disconnect the server!</p>
+                </div>
+
+                <!-- DNS Trust -->
+                <div class="glass p-5 rounded-2xl space-y-4">
+                    <h2 class="text-sm font-orbitron text-green-400 border-b border-white/10 pb-2">DNS TRUST</h2>
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] text-slate-400 font-orbitron">ENABLE DNS TRUST</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="trust-toggle" onchange="toggleTrust()" class="sr-only peer">
+                            <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                        </label>
+                    </div>
+                    <div class="space-y-2">
+                        <input type="text" id="trust-ip-input" placeholder="Trust DNS IP (e.g. 1.1.1.1)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-green-500">
+                        <button onclick="toggleTrust()" class="w-full py-2 bg-green-600/20 hover:bg-green-600/40 border border-green-500/30 rounded-lg text-[10px] font-orbitron text-white transition">UPDATE TRUST DNS</button>
+                    </div>
+                </div>
+
+                <!-- Cache Info -->
+                <div class="glass p-5 rounded-2xl">
+                    <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2 mb-4">CACHE MANAGEMENT</h2>
+                    <button onclick="doAction('clear_cache')" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl border border-white/5 transition flex flex-col items-center">
+                        <span class="text-xs font-bold">FLUSH DNS CACHE</span>
+                        <span class="text-[9px] text-slate-500 font-orbitron">PURGE ALL RECORDS</span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const ctx = document.getElementById('trafficChart').getContext('2d');
+        const trafficChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'Queries', data: [], borderColor: '#00f2ff', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.4 }] },
+            options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748b', font: { size: 10 } } }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } }, plugins: { legend: { display: false } } }
+        });
+
+        async function updateMetrics() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                updateElementStatus('dnsmasq', data.dnsmasq);
+                updateElementStatus('unbound', data.unbound);
+                updateElementStatus('guardian', data.guardian);
+                updateElementStatus('security', data.security.flood_protection && data.security.connection_limit);
+                updateElementStatus('iptables', data.iptables);
+
+                // Update Guardian Logs if available
+                if (data.security?.guardian_logs && data.security.guardian_logs.length > 0) {
+                    const logs = data.security.guardian_logs.join('');
+                    document.getElementById('guardian-logs').innerText = logs;
+                    document.getElementById('guardian-logs-container').classList.remove('hidden');
+                } else {
+                    const container = document.getElementById('guardian-logs-container');
+                    if (container) container.classList.add('hidden');
+                }
+
+                updateMetricValue('cpu', data.metrics.cpu);
+                updateMetricValue('ram', data.metrics.ram);
+                updateMetricValue('perf', data.metrics.dns_perf);
+
+                // Pre-fill Network Form if empty
+                if (!document.getElementById('ip4-addr-input').value) {
+                    document.getElementById('ip4-addr-input').value = data.network?.ip4 || '';
+                    document.getElementById('ip4-gw-input').value = data.network?.ip4_gw || '';
+                    document.getElementById('ip6-addr-input').value = data.network?.ip6 || '';
+                    document.getElementById('ip6-gw-input').value = data.network?.ip6_gw || '';
+                    document.getElementById('ipv6-toggle').checked = data.network?.ipv6_enabled || false;
+                    
+                    // Pre-fill DNS Trust
+                    document.getElementById('trust-ip-input').value = data.trust?.ip || '';
+                    document.getElementById('trust-toggle').checked = data.trust?.enabled || false;
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function updateMetricValue(id, val) {
+            document.getElementById('metric-' + id).innerText = val;
+            document.getElementById('bar-' + id).style.width = val + '%';
+        }
+
+        function updateElementStatus(id, isActive) {
+            const el = document.getElementById('status-' + id);
+            el.innerText = isActive ? 'ACTIVE' : 'OFFLINE';
+            el.className = 'text-[10px] font-orbitron ' + (isActive ? 'status-on' : 'status-off');
+        }
+
+        async function updateTraffic() {
+            try {
+                const res = await fetch('/api/traffic');
+                const data = await res.json();
+                trafficChart.data.labels = data.map(d => d.time);
+                trafficChart.data.datasets[0].data = data.map(d => d.queries);
+                trafficChart.update('none');
+            } catch (e) { console.error(e); }
+        }
+
+        async function runDig() {
+            const domain = document.getElementById('domain-input').value;
+            const qtype = document.getElementById('qtype-input').value;
+            if (!domain) return;
+            const btn = document.getElementById('dig-btn');
+            btn.disabled = true; btn.innerText = 'QUERYING...';
+            try {
+                const res = await fetch('/api/dig', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({domain, qtype}) });
+                const data = await res.json();
+                document.getElementById('dig-result-container').classList.remove('hidden');
+                document.getElementById('dig-result').innerText = data.result;
+            } finally { btn.disabled = false; btn.innerText = 'EXECUTE QUERY'; }
+        }
+
+        async function changeDnsIp() {
+            const dns_ip = document.getElementById('dns-ip-input').value;
+            if (!dns_ip) return;
+            if (!confirm('CHANGE UPSTREAM DNS TO: ' + dns_ip + '?')) return;
+            try { 
+                await fetch('/api/action', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'change_dns', dns_ip}) }); 
+                alert('Upstream DNS Updated');
+            } catch (e) { alert('Failed to update DNS'); }
+        }
+
+        async function toggleIpv6() {
+            const enabled = document.getElementById('ipv6-toggle').checked;
+            try {
+                const response = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'toggle_ipv6', enabled })
+                });
+                const result = await response.json();
+                alert('IPv6 ' + (enabled ? 'Enabled' : 'Disabled'));
+                updateMetrics();
+            } catch (e) {
+                alert('Failed to toggle IPv6');
+            }
+        }
+
+        async function toggleTrust() {
+            const trust_enabled = document.getElementById('trust-toggle').checked;
+            const trust_ip = document.getElementById('trust-ip-input').value;
+            
+            if (trust_enabled && !trust_ip) {
+                alert('Please enter Trust DNS IP first!');
+                document.getElementById('trust-toggle').checked = false;
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'toggle_trust', trust_enabled, trust_ip })
+                });
+                const result = await response.json();
+                alert('DNS Trust ' + (trust_enabled ? 'Enabled (' + trust_ip + ')' : 'Disabled'));
+                updateMetrics();
+            } catch (e) {
+                alert('Failed to update DNS Trust');
+            }
+        }
+
+        async function updateNetwork() {
+            const ip4_addr = document.getElementById('ip4-addr-input').value;
+            const ip4_gw = document.getElementById('ip4-gw-input').value;
+            const ip6_addr = document.getElementById('ip6-addr-input').value;
+            const ip6_gw = document.getElementById('ip6-gw-input').value;
+            const ipv6_enabled = document.getElementById('ipv6-toggle').checked;
+
+            if (!ip4_addr || !ip4_gw) {
+                alert('IPv4 Address and Gateway are required!');
+                return;
+            }
+
+            if (!confirm('WARNING: Changing network settings may disconnect the server. Proceed?')) return;
+
+            try {
+                const response = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: 'update_network',
+                        ip4_addr,
+                        ip4_gw,
+                        ip6_addr,
+                        ip6_gw,
+                        ipv6_enabled
+                    })
+                });
+                const result = await response.json();
+                alert('Network settings updated. System may restart network services.');
+            } catch (e) {
+                alert('Failed to update network settings');
+            }
+        }
+
+        async function doAction(type) {
+            if (!confirm('CONFIRM SYSTEM COMMAND: ' + type.toUpperCase() + '?')) return;
+            try { await fetch('/api/action', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type}) }); updateMetrics(); alert('Command Executed'); } catch (e) { alert('Command failed'); }
+        }
+
+        async function doActionWithDomain(type) {
+            const domain = document.getElementById('domain-input').value;
+            if (!domain) { alert('Please enter a domain first'); return; }
+            if (!confirm('CONFIRM ' + type.toUpperCase() + ' FOR: ' + domain + '?')) return;
+            try { await fetch('/api/action', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type, domain}) }); alert(type.toUpperCase() + ' Applied'); } catch (e) { alert('Action failed'); }
+        }
+
+        async function fetchLogs() {
+            try { const res = await fetch('/api/logs'); const data = await res.json(); document.getElementById('logs-content').innerText = data.logs || 'No recent logs'; } catch (e) { }
+        }
+
+        updateMetrics(); updateTraffic(); fetchLogs();
+        setInterval(updateMetrics, 3000); setInterval(updateTraffic, 5000);
+    </script>
+</body>
+</html>

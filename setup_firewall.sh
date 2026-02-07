@@ -6,12 +6,19 @@
 echo "Setting up Anti-DDoS and DNS Flood Protection..."
 
 # 1. Port yang diizinkan dengan ACL (SSH & Web GUI)
-  # Ambil IP server secara otomatis
-  SERVER_IP=$(ip -4 addr show ens18 | grep inet | awk '{print $2}' | cut -d/ -f1)
-  
-  # Load Whitelist from file
-  WHITELIST_FILE="/home/dns/whitelist.conf"
-  ALLOWED_IPS=("$SERVER_IP")
+# Ambil IP server secara otomatis atau dari argumen
+if [ ! -z "$1" ]; then
+    SERVER_IP=$1
+else
+    # Improved IP detection
+    SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || ip -4 addr show | grep inet | grep -v '127.0.0.1' | head -n1 | awk '{print $2}' | cut -d/ -f1)
+fi
+
+echo "Using Server IP: $SERVER_IP"
+
+# Load Whitelist from file
+WHITELIST_FILE="/home/dns/whitelist.conf"
+ALLOWED_IPS=("$SERVER_IP" "127.0.0.1")
   ALLOWED_SUBNETS=()
   
   if [ -f "$WHITELIST_FILE" ]; then
@@ -90,6 +97,17 @@ iptables -A INPUT -p icmp -j DROP
 iptables -t nat -F PREROUTING
 iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53
 iptables -t nat -A PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 53
+
+# 6. Restore Persistent Blocks from Guardian
+BANNED_IPS_FILE="/home/dns/banned_ips.txt"
+if [ -f "$BANNED_IPS_FILE" ]; then
+    echo "Restoring persistent blocks from $BANNED_IPS_FILE..."
+    while IFS= read -r ip || [ -n "$ip" ]; do
+        if [ ! -z "$ip" ]; then
+            iptables -I INPUT -s "$ip" -j DROP
+        fi
+    done < "$BANNED_IPS_FILE"
+fi
 
 # 6. Drop Invalid Packets
 iptables -A INPUT -m conntrack --ctstate INVALID -j DROP

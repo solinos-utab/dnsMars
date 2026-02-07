@@ -54,12 +54,26 @@ def is_whitelisted(ip):
 
 def get_current_ip():
     try:
-        res = run_cmd("ip -4 addr show ens18 | grep inet | awk '{print $2}' | cut -d/ -f1")
-        if res and res.stdout:
+        # Try default route interface first (most accurate)
+        cmd = "ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+'"
+        res = run_cmd(cmd)
+        if res and res.stdout.strip():
+            return res.stdout.strip()
+
+        # Fallback to looking for the first non-loopback IPv4 address
+        cmd = "ip -4 addr show | grep inet | grep -v '127.0.0.1' | head -n1 | awk '{print $2}' | cut -d/ -f1"
+        res = run_cmd(cmd)
+        if res and res.stdout.strip():
+            return res.stdout.strip()
+            
+        # Specific check for ens18 as a last resort
+        cmd = "ip -4 addr show ens18 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1"
+        res = run_cmd(cmd)
+        if res and res.stdout.strip():
             return res.stdout.strip()
     except:
         pass
-    return "103.68.213.74"
+    return "127.0.0.1"
 
 # Auto-update whitelist with current server IP
 server_ip = get_current_ip()
@@ -78,6 +92,43 @@ def run_cmd(cmd):
         return subprocess.run(cmd, shell=True, capture_output=True, text=True)
     except Exception as e:
         return None
+
+def block_ip(ip):
+    if is_whitelisted(ip):
+        return
+    log_event(f"BLOCKING IP {ip}...")
+    run_cmd(f"sudo iptables -I INPUT -s {ip} -j DROP")
+    run_cmd(f"echo '{ip}' >> {BANNED_IPS_FILE}")
+
+# --- LOG ANALYSIS ---
+def analyze_logs():
+    # Detect DNS attacks from syslog/dnsmasq.log
+    # Example attack: many queries from same IP in short time
+    counts = {}
+    
+    # Read last 2000 lines of dnsmasq log
+    try:
+        if os.path.exists(DNSMASQ_LOG):
+            cmd = f"tail -n 2000 {DNSMASQ_LOG}"
+            res = run_cmd(cmd)
+            if res and res.stdout:
+                for line in res.stdout.splitlines():
+                    # Look for blocked queries
+                    # Feb  7 12:09:27 dnsmasq[123]: config malicious.com is 103.68.213.74 (blocked)
+                    # We match both the old IP and the current server IP
+                    if f"is {server_ip}" in line or "is 0.0.0.0" in line:
+                        match = re.search(r'query\[.*\] .* from ([\d\.]+)', line)
+                        if match:
+                            ip = match.group(1)
+                            if not is_whitelisted(ip):
+                                counts[ip] = counts.get(ip, 0) + 1
+    except Exception as e:
+        log_event(f"Error analyzing logs: {e}")
+    
+    for ip, count in counts.items():
+        if count > MALICIOUS_THRESHOLD:
+            log_event(f"ATTACK DETECTED: IP {ip} sent {count} queries. Blocking IP...")
+            block_ip(ip)
 
 # --- SELF-HEALING LOGIC ---
 def check_and_repair_services():
@@ -134,7 +185,7 @@ def detect_and_block_attacks():
                     ip_counts[ip] = ip_counts.get(ip, 0) + 1
         
         # Detect if an IP is repeatedly trying to access blocked/malicious domains
-        if "is 103.68.213.74" in line or "is 0.0.0.0" in line:
+        if f"is {server_ip}" in line or "is 0.0.0.0" in line:
             # We need to find which IP requested this. This is tricky without session tracking.
             # But we can assume if an IP has high query count AND there are many blocks, it's a target.
             pass

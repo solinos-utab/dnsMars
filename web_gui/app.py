@@ -81,9 +81,20 @@ def change_password():
         f.write(hashed)
     return jsonify({'status': 'success'})
 
+def get_server_ip():
+    try:
+        # Try ens18 or default route
+        cmd = "ip route get 1.1.1.1 | grep -oP 'src \K\S+'"
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if res.stdout.strip():
+            return res.stdout.strip()
+    except:
+        pass
+    return "127.0.0.1"
+
 # --- WAF & SECURITY LAYER ---
 def get_allowed_ips():
-    allowed = ['127.0.0.1', '103.68.213.74']
+    allowed = ['127.0.0.1', get_server_ip()]
     whitelist_path = '/home/dns/whitelist.conf'
     if os.path.exists(whitelist_path):
         try:
@@ -531,8 +542,13 @@ def action():
     elif cmd_type == 'clear_cache':
         run_command("sudo systemctl restart dnsmasq && sudo unbound-control flush_zone .")
     elif cmd_type == 'blacklist' and domain:
-        # Redirect to local landing page (Internet Positif)
-        run_command(f"echo 'address=/{domain}/103.68.213.74' | sudo tee -a /etc/dnsmasq.d/blacklist.conf && sudo systemctl restart dnsmasq")
+        # Redirect to local landing page (Internet Positif) using server IP
+        server_ip = get_server_ip()
+        action_val = data.get('action', 'add')
+        if action_val == 'add':
+            run_command(f"echo 'address=/{domain}/{server_ip}' | sudo tee -a /etc/dnsmasq.d/blacklist.conf && sudo systemctl restart dnsmasq")
+        elif action_val == 'remove':
+            run_command(f"sudo sed -i '/address=\/{domain}\/{server_ip}/d' /etc/dnsmasq.d/blacklist.conf && sudo systemctl restart dnsmasq")
     elif cmd_type == 'whitelist' and domain:
         # Use server=/domain/ to whitelist and forward to a public DNS
         run_command(f"echo 'server=/{domain}/1.1.1.1' | sudo tee -a /etc/dnsmasq.d/whitelist.conf && sudo systemctl restart dnsmasq")
@@ -542,7 +558,8 @@ def action():
         run_command("sudo chmod +x /home/dns/setup_firewall.sh && sudo /home/dns/setup_firewall.sh")
     elif cmd_type == 'malware_shield':
         # Redirect malware domains to landing page
-        cmd = "curl -s https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts | grep '^0.0.0.0' | awk '{print \"address=/\"$2\"/103.68.213.74\"}' | sudo tee /etc/dnsmasq.d/malware.conf > /dev/null && sudo systemctl restart dnsmasq"
+        server_ip = get_server_ip()
+        cmd = f"curl -s https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts | grep '^0.0.0.0' | awk '{{print \"address=/\"$2\"/{server_ip}\"}}' | sudo tee /etc/dnsmasq.d/malware.conf > /dev/null && sudo systemctl restart dnsmasq"
         run_command(cmd)
     elif cmd_type == 'change_dns' and dns_ip:
         # Support multiple IPs separated by comma or space
@@ -571,12 +588,29 @@ def action():
                 ifname = list(config['network']['ethernets'].keys())[0]
                 iface = config['network']['ethernets'][ifname]
                 
-                # Update addresses
-                ip4_with_cidr = ip4_addr if '/' in ip4_addr else f"{ip4_addr}/24"
+                # Update addresses with validation
+                def validate_cidr(addr, max_prefix):
+                    if '/' in addr:
+                        parts = addr.split('/')
+                        if len(parts) == 2:
+                            try:
+                                prefix = int(parts[1])
+                                if 0 <= prefix <= max_prefix:
+                                    return addr
+                            except ValueError:
+                                pass
+                    return None
+
+                ip4_with_cidr = validate_cidr(ip4_addr, 32) or (f"{ip4_addr}/24" if '/' not in ip4_addr else None)
+                if not ip4_with_cidr:
+                    return jsonify({'status': 'error', 'message': f'Invalid IPv4 prefix length in {ip4_addr}'})
+                
                 new_addrs = [ip4_with_cidr]
                 
                 if ipv6_enabled and ip6_addr:
-                    ip6_with_cidr = ip6_addr if '/' in ip6_addr else f"{ip6_addr}/64"
+                    ip6_with_cidr = validate_cidr(ip6_addr, 128) or (f"{ip6_addr}/64" if '/' not in ip6_addr else None)
+                    if not ip6_with_cidr:
+                        return jsonify({'status': 'error', 'message': f'Invalid IPv6 prefix length in {ip6_addr}'})
                     new_addrs.append(ip6_with_cidr)
                 
                 iface['addresses'] = new_addrs
@@ -594,30 +628,15 @@ def action():
                 
                 # Apply changes
                 # Netplan apply can be slow and might disconnect, so we use a longer timeout or no timeout
-                cmd = f"sudo mv {temp_yaml} /etc/netplan/00-installer-config.yaml && sudo netplan apply"
+                cmd = f"sudo mv {temp_yaml} /etc/netplan/00-installer-config.yaml && sudo chmod 600 /etc/netplan/00-installer-config.yaml && sudo netplan apply"
                 apply_res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                 if apply_res.returncode != 0:
                     return jsonify({'status': 'error', 'message': f'Netplan apply failed: {apply_res.stderr}'})
                 
-                # Update dnsmasq
-                new_ip = ip4_addr.split('/')[0]
-                run_command(f"sudo sed -i 's/listen-address=.*/listen-address=127.0.0.1,::1,{new_ip}/' /etc/dnsmasq.d/smartdns.conf")
-                run_command(f"sudo sed -i 's/address=\/dns.mdnet.co.id\/.*/address=\/dns.mdnet.co.id\/{new_ip}/' /etc/dnsmasq.d/smartdns.conf")
+                # Update system via central script
+                run_command(f"sudo bash /home/dns/update_system_ip.sh")
                 
-                # Fix f-string backslash error
-                parts = new_ip.split('.')
-                ptr_record = f"{parts[3]}.{parts[2]}.{parts[1]}.{parts[0]}.in-addr.arpa,dns.mdnet.co.id"
-                run_command(f"sudo sed -i 's/ptr-record=.*/ptr-record={ptr_record}/' /etc/dnsmasq.d/smartdns.conf")
-                run_command(f"sudo sed -i 's/alias=.*,{new_ip}/alias=.*,{new_ip}/' /etc/dnsmasq.d/smartdns.conf") # Update alias target
-                
-                # Update Unbound
-                run_command(f"sudo sed -i 's/access-control: .* allow/access-control: {new_ip}\/32 allow/' /etc/unbound/unbound.conf.d/smartdns.conf")
-                run_command(f"sudo sed -i 's/local-data: \"dns.mdnet.co.id. IN A .*\"/local-data: \"dns.mdnet.co.id. IN A {new_ip}\"/' /etc/unbound/unbound.conf.d/smartdns.conf")
-                run_command(f"sudo sed -i 's/local-data-ptr: \".* dns.mdnet.co.id\"/local-data-ptr: \"{new_ip} dns.mdnet.co.id\"/' /etc/unbound/unbound.conf.d/smartdns.conf")
-                
-                run_command("sudo systemctl restart dnsmasq && sudo systemctl restart unbound")
-                
-                return jsonify({'status': 'success', 'message': 'Network settings updated'})
+                return jsonify({'status': 'success', 'message': 'Network settings updated. System is restarting with new IP.'})
             else:
                 return jsonify({'status': 'error', 'message': 'Invalid netplan structure'})
                 
@@ -628,13 +647,13 @@ def action():
     elif cmd_type == 'toggle_ipv6':
         enabled = data.get('enabled', False)
         if enabled:
-            run_command("sudo sed -i '/listen-address=127.0.0.1/s/$/,::1/' /etc/dnsmasq.d/smartdns.conf")
-            run_command("sudo sed -i 's/do-ip6: no/do-ip6: yes/' /etc/unbound/unbound.conf.d/smartdns.conf")
-            run_command("sudo sed -i '/interface: 127.0.0.1/a \    interface: ::1' /etc/unbound/unbound.conf.d/smartdns.conf")
+            run_command("sudo sed -i '/listen-address=127.0.0.1/s/$/,::1/' /home/dns/dnsmasq_smartdns.conf")
+            run_command("sudo sed -i 's/do-ip6: no/do-ip6: yes/' /home/dns/unbound_smartdns.conf")
+            run_command("sudo sed -i '/interface: 127.0.0.1/a \    interface: ::1' /home/dns/unbound_smartdns.conf")
         else:
-            run_command("sudo sed -i 's/,::1//' /etc/dnsmasq.d/smartdns.conf")
-            run_command("sudo sed -i 's/do-ip6: yes/do-ip6: no/' /etc/unbound/unbound.conf.d/smartdns.conf")
-            run_command("sudo sed -i '/interface: ::1/d' /etc/unbound/unbound.conf.d/smartdns.conf")
+            run_command("sudo sed -i 's/,::1//' /home/dns/dnsmasq_smartdns.conf")
+            run_command("sudo sed -i 's/do-ip6: yes/do-ip6: no/' /home/dns/unbound_smartdns.conf")
+            run_command("sudo sed -i '/interface: ::1/d' /home/dns/unbound_smartdns.conf")
         run_command("sudo systemctl restart dnsmasq && sudo systemctl restart unbound")
     elif cmd_type == 'toggle_trust':
         if trust_enabled and trust_ip:
@@ -653,7 +672,7 @@ def action():
                 f.write(forward_conf)
             run_command("sudo mv /home/dns/temp_forward.conf /etc/unbound/unbound.conf.d/forward.conf")
             # Re-enable aliases if they were disabled
-            run_command("sudo sed -i 's/^#*alias=/alias=/' /etc/dnsmasq.d/smartdns.conf")
+            run_command("sudo sed -i 's/^#*alias=/alias=/' /home/dns/dnsmasq_smartdns.conf")
             run_command("sudo systemctl restart dnsmasq && sudo systemctl restart unbound")
         else:
             # Remove trust server from dnsmasq
@@ -667,7 +686,7 @@ def action():
             run_command("sudo truncate -s 0 /etc/dnsmasq.d/malware.conf")
             run_command("sudo truncate -s 0 /etc/dnsmasq.d/malware_test.conf")
             # Also disable aliases to ensure no redirection to block pages
-            run_command("sudo sed -i 's/^#*alias=/#alias=/' /etc/dnsmasq.d/smartdns.conf")
+            run_command("sudo sed -i 's/^#*alias=/#alias=/' /home/dns/dnsmasq_smartdns.conf")
             run_command("sudo systemctl restart dnsmasq && sudo systemctl restart unbound")
         
     return jsonify({'status': 'success'})

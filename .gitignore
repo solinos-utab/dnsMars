@@ -1,28 +1,26 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-venv/
-ENV/
-
 # Logs
 *.log
+web_gui.log
 guardian.log
+app.log
 
-# Security & SSL (Penting: Jangan backup private key ke public repo)
+# Temporary and Cache
+__pycache__/
+.cache/
+*.tmp
+*.bak
+temp_*
+new_netplan.yaml
+
+# Sensitive Data (Passwords and Keys)
+.password.hash
 web_gui/cert.pem
 web_gui/key.pem
-web_gui/.password.hash
 
-# Trae/IDE
-.trae-server/
+# Git specific
 .trae-aicc/
-.ai_completion/
-
-# OS
+.trae-server/
 .DS_Store
-Thumbs.db
 
-# Git ignore itself
-.git/
+# Large/PDF files (Optional, keeping them if you want them in backup)
+# Buku_Panduan_DNS_MarsData.pdf

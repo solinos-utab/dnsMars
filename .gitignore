@@ -8,11 +8,17 @@ ENV/
 
 # Logs
 *.log
-/home/dns/guardian.log
+guardian.log
 
 # Security & SSL (Penting: Jangan backup private key ke public repo)
-/home/dns/web_gui/cert.pem
-/home/dns/web_gui/key.pem
+web_gui/cert.pem
+web_gui/key.pem
+web_gui/.password.hash
+
+# Trae/IDE
+.trae-server/
+.trae-aicc/
+.ai_completion/
 
 # OS
 .DS_Store

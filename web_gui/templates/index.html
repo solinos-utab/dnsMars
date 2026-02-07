@@ -42,6 +42,65 @@
     </style>
 </head>
 <body class="p-4 md:p-8">
+    <!-- Login Modal -->
+    <div id="login-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-md space-y-6 border border-blue-500/30">
+            <div class="text-center">
+                <h2 class="text-2xl font-orbitron text-white mb-2">ACCESS LOCKED</h2>
+                <p class="text-slate-400 text-xs tracking-widest">PT MARS DATA TELEKOMUNIKASI</p>
+            </div>
+            <div class="space-y-4">
+                <input type="password" id="login-password" placeholder="ENTER ACCESS PASSWORD" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-center text-white focus:outline-none focus:border-blue-500 font-orbitron tracking-widest">
+                <button onclick="attemptLogin()" id="login-btn" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-orbitron rounded-xl transition shadow-[0_0_20px_rgba(37,99,235,0.3)]">UNLOCK SYSTEM</button>
+                <p id="login-error" class="text-red-500 text-[10px] text-center hidden">INVALID ACCESS KEY</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="password-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-md space-y-6 border border-purple-500/30">
+            <div class="text-center">
+                <h2 class="text-2xl font-orbitron text-white mb-2">SECURITY UPDATE</h2>
+                <p class="text-slate-400 text-xs tracking-widest">CHANGE ACCESS PASSWORD</p>
+            </div>
+            <div class="space-y-4">
+                <input type="password" id="new-password" placeholder="NEW PASSWORD" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-center text-white focus:outline-none focus:border-purple-500 font-orbitron">
+                <input type="password" id="confirm-password" placeholder="CONFIRM NEW PASSWORD" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-center text-white focus:outline-none focus:border-purple-500 font-orbitron">
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="closePasswordModal()" class="py-3 bg-slate-800 hover:bg-slate-700 text-white font-orbitron rounded-xl transition">CANCEL</button>
+                    <button onclick="submitNewPassword()" class="py-3 bg-purple-600 hover:bg-purple-500 text-white font-orbitron rounded-xl transition">UPDATE</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Digtest Result Modal -->
+    <div id="dig-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-2xl space-y-6 border border-blue-500/30">
+            <div class="flex justify-between items-center border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-2xl font-orbitron text-white">QUERY RESULT</h2>
+                    <p id="dig-modal-subtitle" class="text-blue-400 text-[10px] tracking-widest uppercase">DEEP INSPECTION SUCCESS</p>
+                </div>
+                <button onclick="closeDigModal()" class="text-slate-400 hover:text-white transition p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="relative">
+                <pre id="dig-modal-result" class="max-h-[400px] overflow-y-auto rounded-xl p-6 text-sm font-mono leading-relaxed border border-white/5 bg-black/40"></pre>
+                <div class="absolute top-4 right-4 animate-pulse">
+                    <span class="w-2 h-2 bg-blue-500 rounded-full inline-block"></span>
+                </div>
+            </div>
+            <div class="flex justify-end">
+                <button onclick="closeDigModal()" class="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-orbitron rounded-xl transition shadow-lg shadow-blue-900/20">CLOSE RESULT</button>
+            </div>
+        </div>
+    </div>
+
     <div class="max-w-7xl mx-auto">
         <!-- Header -->
         <header class="mb-8 flex flex-col lg:flex-row justify-between items-center gap-6">
@@ -51,7 +110,11 @@
                 </div>
                 <div>
                     <h1 class="text-2xl md:text-3xl font-bold font-orbitron tracking-wider text-white">PT MARS DATA TELEKOMUNIKASI</h1>
-                    <p class="text-blue-400 font-medium tracking-widest text-xs">DNS MARS DATA TELEKOMUNIKASI</p>
+                    <div class="flex items-center gap-4 mt-1">
+                        <p class="text-blue-400 font-medium tracking-widest text-xs">DNS MARS DATA TELEKOMUNIKASI</p>
+                        <button onclick="openPasswordModal()" class="text-[9px] text-slate-500 hover:text-purple-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">CHANGE PWD</button>
+                        <button onclick="logout()" class="text-[9px] text-slate-500 hover:text-red-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">LOGOUT</button>
+                    </div>
                 </div>
             </div>
             
@@ -176,7 +239,6 @@
                             </div>
                         </div>
                     </div>
-                    <div id="dig-result-container" class="hidden"><pre id="dig-result" class="max-h-[150px] overflow-y-auto rounded-lg p-2 mt-2"></pre></div>
                 </div>
 
                 <!-- IPv6 Management -->
@@ -198,8 +260,8 @@
                                 <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
                             </label>
                         </div>
-                        <input type="text" id="ip6-addr-input" placeholder="IPv6 Address/Prefix" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-purple-500">
-                        <input type="text" id="ip6-gw-input" placeholder="IPv6 Gateway" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-purple-500">
+                        <input type="text" id="ip6-addr-input" oninput="if(this.value && !document.getElementById('ipv6-toggle').checked) document.getElementById('ipv6-toggle').checked = true;" placeholder="IPv6 Address/Prefix (e.g. 2001:db8::1/64)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-purple-500">
+                        <input type="text" id="ip6-gw-input" placeholder="IPv6 Gateway (e.g. 2001:db8::1)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-purple-500">
                     </div>
 
                     <button onclick="updateNetwork()" class="w-full py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-orbitron text-[10px] rounded-lg transition shadow-lg">APPLY NETWORK CHANGES</button>
@@ -236,6 +298,93 @@
     </div>
 
     <script>
+        // --- AUTH FUNCTIONS ---
+        async function attemptLogin() {
+            const passwordInput = document.getElementById('login-password');
+            const password = passwordInput.value.trim(); // Trim any accidental spaces
+            const btn = document.getElementById('login-btn');
+            const error = document.getElementById('login-error');
+            
+            btn.disabled = true;
+            btn.innerText = 'VERIFYING...';
+            error.classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+                
+                if (res.ok) {
+                    document.getElementById('login-modal').classList.add('hidden');
+                    updateMetrics();
+                    setInterval(updateMetrics, 5000);
+                    setInterval(updateTraffic, 3000);
+                } else {
+                    error.classList.remove('hidden');
+                }
+            } catch (e) {
+                error.innerText = 'CONNECTION ERROR';
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'UNLOCK SYSTEM';
+            }
+        }
+
+        async function logout() {
+            await fetch('/api/logout', { method: 'POST' });
+            location.reload();
+        }
+
+        function openPasswordModal() {
+            document.getElementById('password-modal').classList.remove('hidden');
+        }
+
+        function closePasswordModal() {
+            document.getElementById('password-modal').classList.add('hidden');
+            document.getElementById('new-password').value = '';
+            document.getElementById('confirm-password').value = '';
+        }
+
+        async function submitNewPassword() {
+            const newPwd = document.getElementById('new-password').value;
+            const confirmPwd = document.getElementById('confirm-password').value;
+
+            if (!newPwd || newPwd.length < 4) {
+                alert('Password too short (min 4 chars)');
+                return;
+            }
+            if (newPwd !== confirmPwd) {
+                alert('Passwords do not match');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/change_password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_password: newPwd })
+                });
+                
+                if (res.ok) {
+                    alert('Password updated successfully!');
+                    closePasswordModal();
+                } else {
+                    const data = await res.json();
+                    alert('Update failed: ' + data.message);
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+        }
+
+        // Add enter key listener for login
+        document.getElementById('login-password')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') attemptLogin();
+        });
+
         const ctx = document.getElementById('trafficChart').getContext('2d');
         const trafficChart = new Chart(ctx, {
             type: 'line',
@@ -243,9 +392,30 @@
             options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748b', font: { size: 10 } } }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } }, plugins: { legend: { display: false } } }
         });
 
+        let metricsInterval, trafficInterval;
+
         async function updateMetrics() {
+            // Check auth first
+            try {
+                const authRes = await fetch('/api/check_auth');
+                const authData = await authRes.json();
+                if (!authData.authenticated) {
+                    document.getElementById('login-modal').classList.remove('hidden');
+                    return; 
+                } else {
+                    document.getElementById('login-modal').classList.add('hidden');
+                }
+            } catch (e) {
+                console.error("Auth check failed", e);
+                return;
+            }
+
             try {
                 const res = await fetch('/api/status');
+                if (res.status === 401) {
+                    document.getElementById('login-modal').classList.remove('hidden');
+                    return;
+                }
                 const data = await res.json();
                 updateElementStatus('dnsmasq', data.dnsmasq);
                 updateElementStatus('unbound', data.unbound);
@@ -278,8 +448,29 @@
                     // Pre-fill DNS Trust
                     document.getElementById('trust-ip-input').value = data.trust?.ip || '';
                     document.getElementById('trust-toggle').checked = data.trust?.enabled || false;
+                    
+                    // Also fetch logs once
+                    fetchLogs();
+                    // Start traffic update
+                    updateTraffic();
                 }
             } catch (e) { console.error(e); }
+            
+            // Schedule next update
+            setTimeout(updateMetrics, 5000);
+        }
+
+        async function updateTraffic() {
+            try {
+                const res = await fetch('/api/traffic');
+                if (res.status === 401) return;
+                const data = await res.json();
+                trafficChart.data.labels = data.map(d => d.time);
+                trafficChart.data.datasets[0].data = data.map(d => d.queries);
+                trafficChart.update('none');
+            } catch (e) { console.error(e); }
+            
+            setTimeout(updateTraffic, 3000);
         }
 
         function updateMetricValue(id, val) {
@@ -289,18 +480,9 @@
 
         function updateElementStatus(id, isActive) {
             const el = document.getElementById('status-' + id);
+            if (!el) return;
             el.innerText = isActive ? 'ACTIVE' : 'OFFLINE';
             el.className = 'text-[10px] font-orbitron ' + (isActive ? 'status-on' : 'status-off');
-        }
-
-        async function updateTraffic() {
-            try {
-                const res = await fetch('/api/traffic');
-                const data = await res.json();
-                trafficChart.data.labels = data.map(d => d.time);
-                trafficChart.data.datasets[0].data = data.map(d => d.queries);
-                trafficChart.update('none');
-            } catch (e) { console.error(e); }
         }
 
         async function runDig() {
@@ -308,13 +490,50 @@
             const qtype = document.getElementById('qtype-input').value;
             if (!domain) return;
             const btn = document.getElementById('dig-btn');
-            btn.disabled = true; btn.innerText = 'QUERYING...';
+            const modal = document.getElementById('dig-modal');
+            const resultDisplay = document.getElementById('dig-modal-result');
+            const subtitle = document.getElementById('dig-modal-subtitle');
+            
+            btn.disabled = true; 
+            btn.innerText = 'QUERYING...';
+            
             try {
-                const res = await fetch('/api/dig', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({domain, qtype}) });
+                const res = await fetch('/api/dig', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({domain, qtype}) 
+                });
+                
                 const data = await res.json();
-                document.getElementById('dig-result-container').classList.remove('hidden');
-                document.getElementById('dig-result').innerText = data.result;
-            } finally { btn.disabled = false; btn.innerText = 'EXECUTE QUERY'; }
+                modal.classList.remove('hidden');
+                
+                if (res.ok) {
+                    resultDisplay.innerText = data.result;
+                    resultDisplay.classList.remove('text-red-400');
+                    subtitle.innerText = 'DEEP INSPECTION SUCCESS: ' + domain.toUpperCase();
+                    subtitle.classList.remove('text-red-400');
+                    subtitle.classList.add('text-blue-400');
+                } else {
+                    resultDisplay.innerText = 'ERROR: ' + (data.message || 'Query failed');
+                    resultDisplay.classList.add('text-red-400');
+                    subtitle.innerText = 'INSPECTION FAILED';
+                    subtitle.classList.remove('text-blue-400');
+                    subtitle.classList.add('text-red-400');
+                }
+            } catch (e) { 
+                modal.classList.remove('hidden');
+                resultDisplay.innerText = 'CONNECTION ERROR';
+                resultDisplay.classList.add('text-red-400');
+                subtitle.innerText = 'NETWORK ERROR';
+                subtitle.classList.add('text-red-400');
+            } finally { 
+                btn.disabled = false; 
+                btn.innerText = 'EXECUTE QUERY'; 
+            }
+        }
+
+        function closeDigModal() {
+            document.getElementById('dig-modal').classList.add('hidden');
         }
 
         async function changeDnsIp() {
@@ -381,6 +600,11 @@
 
             if (!confirm('WARNING: Changing network settings may disconnect the server. Proceed?')) return;
 
+            const btn = event.target;
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = 'APPLYING CHANGES...';
+
             try {
                 const response = await fetch('/api/action', {
                     method: 'POST',
@@ -395,9 +619,19 @@
                     })
                 });
                 const result = await response.json();
-                alert('Network settings updated. System may restart network services.');
+                if (result.status === 'success') {
+                    alert('Network settings updated successfully.');
+                    // Force refresh network info
+                    document.getElementById('ip4-addr-input').value = ''; 
+                    updateMetrics();
+                } else {
+                    alert('Error: ' + result.message);
+                }
             } catch (e) {
-                alert('Failed to update network settings');
+                alert('Failed to update network settings: ' + e);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = originalText;
             }
         }
 
@@ -417,8 +651,9 @@
             try { const res = await fetch('/api/logs'); const data = await res.json(); document.getElementById('logs-content').innerText = data.logs || 'No recent logs'; } catch (e) { }
         }
 
-        updateMetrics(); updateTraffic(); fetchLogs();
-        setInterval(updateMetrics, 3000); setInterval(updateTraffic, 5000);
+        // Initialize
+        updateMetrics();
+        // Intervals are now managed within updateMetrics and attemptLogin
     </script>
 </body>
 </html>

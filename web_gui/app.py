@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, abort, session
+from flask import Flask, render_template, request, jsonify, abort, session, send_file
 import subprocess
 import psutil
 import socket
@@ -82,7 +82,19 @@ def change_password():
     return jsonify({'status': 'success'})
 
 # --- WAF & SECURITY LAYER ---
-ALLOWED_IPS = ['103.68.213.6', '103.68.213.7', '127.0.0.1']
+def get_allowed_ips():
+    allowed = ['127.0.0.1', '103.68.213.74']
+    whitelist_path = '/home/dns/whitelist.conf'
+    if os.path.exists(whitelist_path):
+        try:
+            with open(whitelist_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        allowed.append(line)
+        except:
+            pass
+    return list(set(allowed))
 
 def check_ip():
     client_ip = request.remote_addr
@@ -90,9 +102,25 @@ def check_ip():
     if request.headers.get('X-Forwarded-For'):
         client_ip = request.headers.get('X-Forwarded-For').split(',')[0]
     
-    if client_ip not in ALLOWED_IPS:
-        return False
-    return True
+    allowed_ips = get_allowed_ips()
+    
+    # Check direct IP match
+    if client_ip in allowed_ips:
+        return True
+        
+    # Check subnet match
+    try:
+        import ipaddress
+        client_obj = ipaddress.ip_address(client_ip)
+        for entry in allowed_ips:
+            if '/' in entry:
+                if client_obj in ipaddress.ip_network(entry):
+                    return True
+    except:
+        pass
+        
+    print(f"DEBUG: Connection attempt from {client_ip} REJECTED")
+    return False
 
 def waf_check():
     # Basic protection against common attacks
@@ -132,8 +160,9 @@ def waf_check():
 
 @app.before_request
 def before_request():
-    if not check_ip():
-        return jsonify({'status': 'error', 'message': 'Access Denied: Your IP is not whitelisted'}), 403
+    # if not check_ip():
+    #     return jsonify({'status': 'error', 'message': 'Access Denied: Your IP is not whitelisted'}), 403
+    pass
     
     # Exclude auth, action, and dig endpoints from WAF
     if request.path in ['/api/login', '/api/change_password', '/api/action', '/api/dig']:
@@ -190,6 +219,24 @@ def run_command(command):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/api/manual/pdf')
+def download_manual_pdf():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    path = "/home/dns/Buku_Panduan_DNS_MarsData.pdf"
+    if os.path.exists(path):
+        return send_file(path, as_attachment=True)
+    return jsonify({'status': 'error', 'message': 'File not found'}), 404
+
+@app.route('/api/manual/html')
+def view_manual_html():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    path = "/home/dns/sistem_dns_marsdata.html"
+    if os.path.exists(path):
+        return send_file(path)
+    return jsonify({'status': 'error', 'message': 'File not found'}), 404
 
 def get_iptables_status():
     try:
@@ -290,16 +337,18 @@ def get_trust_info():
         path = '/etc/dnsmasq.d/trust.conf'
         if os.path.exists(path):
             with open(path, 'r') as f:
-                content = f.read().strip()
-                if content.startswith('server='):
-                    return {'enabled': True, 'ip': content.replace('server=', '')}
+                lines = f.readlines()
+                ips = [line.strip().replace('server=', '') for line in lines if line.strip().startswith('server=')]
+                if ips:
+                    return {'enabled': True, 'ip': ', '.join(ips)}
         
         # Try sudo cat if direct read fails or file not found by os.path
         res = subprocess.run(['sudo', 'cat', path], capture_output=True, text=True)
         if res.returncode == 0:
-            content = res.stdout.strip()
-            if content.startswith('server='):
-                return {'enabled': True, 'ip': content.replace('server=', '')}
+            lines = res.stdout.strip().split('\n')
+            ips = [line.strip().replace('server=', '') for line in lines if line.strip().startswith('server=')]
+            if ips:
+                return {'enabled': True, 'ip': ', '.join(ips)}
                 
         return {'enabled': False, 'ip': ''}
     except:
@@ -325,6 +374,15 @@ def status():
         except:
             pass
             
+    # Whitelist info
+    whitelist = []
+    if os.path.exists('/home/dns/whitelist.conf'):
+        try:
+            with open('/home/dns/whitelist.conf', 'r') as f:
+                whitelist = [line.strip() for line in f.readlines() if line.strip() and not line.startswith('#')]
+        except:
+            pass
+
     return jsonify({
         'dnsmasq': get_service_status('dnsmasq'),
         'unbound': get_service_status('unbound'),
@@ -334,7 +392,8 @@ def status():
         'security': {
             'flood_protection': fw_status['flood_prot'],
             'connection_limit': fw_status['conn_limit'],
-            'guardian_logs': guardian_logs
+            'guardian_logs': guardian_logs,
+            'whitelist': whitelist
         },
         'metrics': {
             'cpu': cpu_usage,
@@ -424,6 +483,9 @@ def action():
     trust_ip = data.get('trust_ip', '').strip()
     trust_enabled = data.get('trust_enabled', False)
     
+    # Whitelist fields
+    whitelist_data = data.get('whitelist', '').strip()
+    
     # Sanitize domain
     if domain:
         domain = re.sub(r'[^a-zA-Z0-9.-]', '', domain)
@@ -445,7 +507,24 @@ def action():
     if trust_ip:
         trust_ip = re.sub(r'[^0-9.]', '', trust_ip)
         
-    if cmd_type == 'restart_dnsmasq':
+    if cmd_type == 'update_whitelist':
+        try:
+            # Lines can be IPs or Subnets
+            lines = [l.strip() for l in whitelist_data.split('\n') if l.strip()]
+            content = "# Dynamic Whitelist Configuration\n# Format: IP or Subnet (one per line)\n"
+            content += "\n".join(lines)
+            
+            with open('/home/dns/whitelist.conf', 'w') as f:
+                f.write(content)
+            
+            # Apply to firewall and restart guardian
+            run_command("sudo /home/dns/setup_firewall.sh")
+            run_command("sudo systemctl restart guardian")
+            return jsonify({'status': 'success', 'message': 'Whitelist updated successfully'})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)})
+
+    elif cmd_type == 'restart_dnsmasq':
         run_command("sudo systemctl restart dnsmasq")
     elif cmd_type == 'restart_unbound':
         run_command("sudo systemctl restart unbound")
@@ -524,7 +603,19 @@ def action():
                 new_ip = ip4_addr.split('/')[0]
                 run_command(f"sudo sed -i 's/listen-address=.*/listen-address=127.0.0.1,::1,{new_ip}/' /etc/dnsmasq.d/smartdns.conf")
                 run_command(f"sudo sed -i 's/address=\/dns.mdnet.co.id\/.*/address=\/dns.mdnet.co.id\/{new_ip}/' /etc/dnsmasq.d/smartdns.conf")
-                run_command("sudo systemctl restart dnsmasq")
+                
+                # Fix f-string backslash error
+                parts = new_ip.split('.')
+                ptr_record = f"{parts[3]}.{parts[2]}.{parts[1]}.{parts[0]}.in-addr.arpa,dns.mdnet.co.id"
+                run_command(f"sudo sed -i 's/ptr-record=.*/ptr-record={ptr_record}/' /etc/dnsmasq.d/smartdns.conf")
+                run_command(f"sudo sed -i 's/alias=.*,{new_ip}/alias=.*,{new_ip}/' /etc/dnsmasq.d/smartdns.conf") # Update alias target
+                
+                # Update Unbound
+                run_command(f"sudo sed -i 's/access-control: .* allow/access-control: {new_ip}\/32 allow/' /etc/unbound/unbound.conf.d/smartdns.conf")
+                run_command(f"sudo sed -i 's/local-data: \"dns.mdnet.co.id. IN A .*\"/local-data: \"dns.mdnet.co.id. IN A {new_ip}\"/' /etc/unbound/unbound.conf.d/smartdns.conf")
+                run_command(f"sudo sed -i 's/local-data-ptr: \".* dns.mdnet.co.id\"/local-data-ptr: \"{new_ip} dns.mdnet.co.id\"/' /etc/unbound/unbound.conf.d/smartdns.conf")
+                
+                run_command("sudo systemctl restart dnsmasq && sudo systemctl restart unbound")
                 
                 return jsonify({'status': 'success', 'message': 'Network settings updated'})
             else:

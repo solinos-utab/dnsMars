@@ -7,9 +7,64 @@ from datetime import datetime
 # --- CONFIGURATION ---
 LOG_FILE = "/var/log/syslog"
 DNSMASQ_LOG = "/var/log/dnsmasq.log"
-BAN_THRESHOLD = 50  # Requests per minute from a single IP
-WHITELIST = ["127.0.0.1", "103.68.213.6", "103.68.213.7"]
+BAN_THRESHOLD = 1800  # Increased to match 1500 QPS (Checking 2000 log lines)
+MALICIOUS_THRESHOLD = 50 # Increased slightly
+WHITELIST_FILE = "/home/dns/whitelist.conf"
 GUARDIAN_LOG = "/home/dns/guardian.log"
+BANNED_IPS_FILE = "/home/dns/banned_ips.txt"
+
+def load_whitelist():
+    wl = ["127.0.0.1"]
+    subnets = []
+    if os.path.exists(WHITELIST_FILE):
+        try:
+            with open(WHITELIST_FILE, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    if '/' in line:
+                        subnets.append(line)
+                    else:
+                        wl.append(line)
+        except Exception as e:
+            print(f"Error loading whitelist: {e}")
+    return wl, subnets
+
+WHITELIST, WHITELIST_SUBNETS = load_whitelist()
+
+def is_whitelisted(ip):
+    if ip in WHITELIST:
+        return True
+    
+    # Check subnets
+    try:
+        import ipaddress
+        ip_obj = ipaddress.ip_address(ip)
+        for subnet in WHITELIST_SUBNETS:
+            if ip_obj in ipaddress.ip_network(subnet):
+                return True
+    except Exception:
+        # Fallback if ipaddress is not available or ip is invalid
+        for subnet in WHITELIST_SUBNETS:
+            base_subnet = subnet.split('/')[0].rsplit('.', 1)[0]
+            if ip.startswith(base_subnet):
+                return True
+    return False
+
+def get_current_ip():
+    try:
+        res = run_cmd("ip -4 addr show ens18 | grep inet | awk '{print $2}' | cut -d/ -f1")
+        if res and res.stdout:
+            return res.stdout.strip()
+    except:
+        pass
+    return "103.68.213.74"
+
+# Auto-update whitelist with current server IP
+server_ip = get_current_ip()
+if server_ip not in WHITELIST:
+    WHITELIST.append(server_ip)
 
 def log_event(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -54,37 +109,61 @@ def check_and_repair_services():
 
 # --- ATTACK DETECTION LOGIC ---
 def detect_and_block_attacks():
-    # Detect DNS Flood Attacks from dnsmasq log
     if not os.path.exists(DNSMASQ_LOG):
         return
 
-    # Get last 1000 lines
-    lines = run_cmd(f"tail -n 1000 {DNSMASQ_LOG}")
+    # Get last 2000 lines to have a better sample
+    lines = run_cmd(f"tail -n 2000 {DNSMASQ_LOG}")
     if not lines or not lines.stdout:
         return
 
     ip_counts = {}
+    malicious_counts = {}
+    
+    # Example dnsmasq log lines:
+    # Feb  7 12:09:27 dnsmasq[123]: query[A] google.com from 1.2.3.4
+    # Feb  7 12:09:27 dnsmasq[123]: reply google.com is 142.250.190.46
+    # Feb  7 12:09:27 dnsmasq[123]: config malicious.com is 103.68.213.74 (blocked)
+
     for line in lines.stdout.splitlines():
         if "query[" in line:
-            # Extract IP address
             match = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
             if match:
                 ip = match.group(1)
-                if ip not in WHITELIST:
+                if not is_whitelisted(ip):
                     ip_counts[ip] = ip_counts.get(ip, 0) + 1
+        
+        # Detect if an IP is repeatedly trying to access blocked/malicious domains
+        if "is 103.68.213.74" in line or "is 0.0.0.0" in line:
+            # We need to find which IP requested this. This is tricky without session tracking.
+            # But we can assume if an IP has high query count AND there are many blocks, it's a target.
+            pass
 
     for ip, count in ip_counts.items():
+        # Only block if it really exceeds a high threshold (e.g., 200 queries in 2000 lines ~ 1 minute)
         if count > BAN_THRESHOLD:
-            log_event(f"ATTACK DETECTED: IP {ip} sent {count} queries. Blocking IP...")
+            log_event(f"ATTACK DETECTED: IP {ip} sent {count} queries. Checking if it should be blocked...")
+            
+            # Additional check: If it's whitelisted, don't block
+            if is_whitelisted(ip):
+                log_event(f"SKIP BLOCK: IP {ip} is whitelisted.")
+                continue
+
+            log_event(f"BLOCKING IP {ip}...")
             run_cmd(f"sudo iptables -I INPUT -s {ip} -j DROP")
-            # Log to a permanent ban list
-            run_cmd(f"echo '{ip}' >> /home/dns/banned_ips.txt")
+            run_cmd(f"echo '{ip}' >> {BANNED_IPS_FILE}")
 
 # --- MAIN LOOP ---
 if __name__ == "__main__":
     log_event("INTELLIGENT GUARDIAN STARTED: Monitoring system health and security...")
     while True:
         try:
+            # Refresh server IP and Whitelist in case of network changes
+            current_ip = get_current_ip()
+            if current_ip and current_ip not in WHITELIST:
+                WHITELIST.append(current_ip)
+                log_event(f"WHITELIST UPDATED: Added new server IP {current_ip}")
+
             check_and_repair_services()
             detect_and_block_attacks()
             time.sleep(10) # Run every 10 seconds

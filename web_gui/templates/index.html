@@ -178,6 +178,21 @@
                         <button onclick="changeDnsIp()" class="w-full py-2 bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/30 rounded-lg text-[10px] font-orbitron text-white transition">UPDATE UPSTREAM</button>
                     </div>
                 </div>
+
+                <!-- Documentation -->
+                <div class="glass p-5 rounded-2xl space-y-3">
+                    <h2 class="text-sm font-orbitron text-purple-400 border-b border-white/10 pb-2">DOCUMENTATION</h2>
+                    <div class="grid grid-cols-1 gap-2">
+                        <a href="/api/manual/html" target="_blank" class="text-left px-4 py-3 bg-purple-900/20 hover:bg-purple-900/40 border border-purple-500/30 rounded-xl transition group flex flex-col">
+                            <span class="block text-[10px] text-purple-400 font-orbitron">READ ONLINE</span>
+                            <span class="text-xs font-bold text-white">SYSTEM MANUAL (HTML)</span>
+                        </a>
+                        <a href="/api/manual/pdf" class="text-left px-4 py-3 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-500/30 rounded-xl transition group flex flex-col">
+                            <span class="block text-[10px] text-blue-400 font-orbitron">DOWNLOAD</span>
+                            <span class="text-xs font-bold text-white">PDF VERSION</span>
+                        </a>
+                    </div>
+                </div>
             </div>
 
             <!-- Middle Column: Traffic & Logs -->
@@ -204,6 +219,18 @@
                         <button onclick="fetchLogs()" class="text-[10px] text-blue-400 hover:underline">REFRESH LOGS</button>
                     </div>
                     <pre id="logs-content" class="h-[150px] overflow-y-auto rounded-lg p-3">Waiting for logs...</pre>
+                </div>
+
+                <!-- Global Whitelist (Moved for better visibility) -->
+                <div class="glass p-6 rounded-2xl space-y-4">
+                    <div class="flex justify-between items-center border-b border-white/10 pb-2">
+                        <h2 class="text-sm font-orbitron text-cyan-400">GLOBAL WHITELIST</h2>
+                        <span class="text-[9px] text-slate-500">IPs here bypass all security blocks</span>
+                    </div>
+                    <div class="space-y-3">
+                        <textarea id="whitelist-input" placeholder="1.2.3.4&#10;192.168.1.0/24" class="w-full h-32 bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-cyan-400 font-mono focus:outline-none focus:border-cyan-500"></textarea>
+                        <button onclick="updateWhitelist()" class="w-full py-3 bg-cyan-600/20 hover:bg-cyan-600/40 border border-cyan-500/30 rounded-xl text-xs font-orbitron text-white transition">APPLY & SAVE WHITELIST</button>
+                    </div>
                 </div>
                 
                 <div class="grid grid-cols-2 gap-4">
@@ -448,11 +475,18 @@
                     // Pre-fill DNS Trust
                     document.getElementById('trust-ip-input').value = data.trust?.ip || '';
                     document.getElementById('trust-toggle').checked = data.trust?.enabled || false;
-                    
-                    // Also fetch logs once
+                }
+
+                // Pre-fill Whitelist if empty
+                if (!document.getElementById('whitelist-input').value && data.security?.whitelist) {
+                    document.getElementById('whitelist-input').value = data.security.whitelist.join('\n');
+                }
+                
+                // Fetch logs and traffic if first run
+                if (!window.firstRunDone) {
                     fetchLogs();
-                    // Start traffic update
                     updateTraffic();
+                    window.firstRunDone = true;
                 }
             } catch (e) { console.error(e); }
             
@@ -632,6 +666,27 @@
             } finally {
                 btn.disabled = false;
                 btn.innerText = originalText;
+            }
+        }
+
+        async function updateWhitelist() {
+            const whitelist = document.getElementById('whitelist-input').value;
+            if (!confirm('CONFIRM GLOBAL WHITELIST UPDATE?')) return;
+            try {
+                const response = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'update_whitelist', whitelist })
+                });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    alert('Whitelist updated and firewall applied.');
+                    updateMetrics();
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (e) {
+                alert('Failed to update whitelist');
             }
         }
 

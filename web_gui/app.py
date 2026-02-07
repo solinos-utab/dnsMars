@@ -3,7 +3,7 @@ import subprocess
 import psutil
 import socket
 import re
-
+import os
 import time
 from datetime import datetime, timedelta
 
@@ -266,9 +266,10 @@ def action():
     
     # Sanitize IPs
     if dns_ip:
-        dns_ip = re.sub(r'[^0-9.]', '', dns_ip)
+        # Allow dots, numbers, spaces and commas for multiple IPs
+        dns_ip = re.sub(r'[^0-9., ]', '', dns_ip)
     if ipv6_ip:
-        ipv6_ip = re.sub(r'[^a-fA-F0-9:/]', '', ipv6_ip)
+        ipv6_ip = re.sub(r'[^a-fA-F0-9:/, ]', '', ipv6_ip)
     if trust_ip:
         trust_ip = re.sub(r'[^0-9.]', '', trust_ip)
 
@@ -291,7 +292,10 @@ def action():
         cmd = "curl -s https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts | grep '^0.0.0.0' | awk '{print \"address=/\"$2\"/0.0.0.0\"}' | sudo tee /etc/dnsmasq.d/malware.conf > /dev/null && sudo systemctl restart dnsmasq"
         run_command(cmd)
     elif cmd_type == 'change_dns' and dns_ip:
-        forward_conf = f"forward-zone:\n    name: \".\"\n    forward-addr: {dns_ip}\n"
+        # Support multiple IPs separated by comma or space
+        ips = re.split(r'[,\s]+', dns_ip)
+        forward_lines = "\n".join([f"    forward-addr: {ip.strip()}" for ip in ips if ip.strip()])
+        forward_conf = f"forward-zone:\n    name: \".\"\n{forward_lines}\n"
         run_command(f"echo '{forward_conf}' | sudo tee /etc/unbound/unbound.conf.d/forward.conf && sudo systemctl restart unbound")
     elif cmd_type == 'update_network':
         try:

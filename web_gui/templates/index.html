@@ -39,6 +39,35 @@
         pre { background: #0a0f1d; color: var(--neon-blue); border: 1px solid rgba(0, 242, 255, 0.1); font-size: 10px; line-height: 1.2; }
         .progress-bar { height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; }
         .progress-fill { height: 100%; background: linear-gradient(90deg, var(--neon-blue), var(--neon-purple)); transition: width 0.5s ease; }
+        
+        /* Fullscreen Support */
+        .fullscreen-mode {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 9999 !important;
+            background: var(--dark-bg) !important;
+            padding: 2rem !important;
+            border-radius: 0 !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+        .fullscreen-mode .chart-wrapper {
+            flex-grow: 1 !important;
+            height: auto !important;
+        }
+        .fullscreen-mode canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        .fullscreen-exit-btn {
+            display: none;
+        }
+        .fullscreen-mode .fullscreen-exit-btn {
+            display: block;
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -214,12 +243,22 @@
 
             <!-- Middle Column: Traffic & Logs -->
             <div class="lg:col-span-2 space-y-6">
-                <div class="glass p-6 rounded-2xl h-[400px]">
+                <div id="traffic-container" class="glass p-6 rounded-2xl h-[400px] transition-all duration-300">
                     <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-sm font-orbitron text-white">TRAFFIC ANALYSIS</h2>
-                        <span class="text-[10px] text-blue-400 animate-pulse">● LIVE MONITORING</span>
+                        <div class="flex items-center gap-2">
+                            <h2 class="text-sm font-orbitron text-white uppercase tracking-wider">Traffic Analysis</h2>
+                            <button onclick="toggleFullscreen('traffic-container')" class="fullscreen-exit-btn text-xs bg-red-500/20 hover:bg-red-500/40 text-red-400 px-3 py-1 rounded-lg border border-red-500/30 transition font-orbitron">EXIT FULLSCREEN</button>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-[10px] text-blue-400 animate-pulse">● LIVE MONITORING</span>
+                            <button onclick="toggleFullscreen('traffic-container')" class="text-slate-400 hover:text-white transition p-1" title="Toggle Fullscreen">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                                </svg>
+                            </button>
+                        </div>
                     </div>
-                    <div class="h-[320px]"><canvas id="trafficChart"></canvas></div>
+                    <div class="h-[320px] chart-wrapper"><canvas id="trafficChart"></canvas></div>
                 </div>
 
                 <div class="glass p-6 rounded-2xl hidden" id="guardian-logs-container">
@@ -573,6 +612,45 @@
             } catch (e) { console.error(e); }
             
             setTimeout(updateTraffic, 3000);
+        }
+
+        function toggleFullscreen(elemId) {
+            const elem = document.getElementById(elemId);
+            if (!document.fullscreenElement) {
+                if (elem.requestFullscreen) {
+                    elem.requestFullscreen();
+                } else if (elem.webkitRequestFullscreen) { /* Safari */
+                    elem.webkitRequestFullscreen();
+                } else if (elem.msRequestFullscreen) { /* IE11 */
+                    elem.msRequestFullscreen();
+                }
+                elem.classList.add('fullscreen-mode');
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) { /* Safari */
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) { /* IE11 */
+                    document.msExitFullscreen();
+                }
+            }
+        }
+
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+        document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+        document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+        function handleFullscreenChange() {
+            const elem = document.getElementById('traffic-container');
+            if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
+                elem.classList.remove('fullscreen-mode');
+            } else {
+                elem.classList.add('fullscreen-mode');
+            }
+            if (trafficChart) {
+                trafficChart.resize();
+            }
         }
 
         function updateMetricValue(id, val) {

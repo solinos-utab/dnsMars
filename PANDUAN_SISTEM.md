@@ -1,4 +1,4 @@
-# 📘 BUKU PANDUAN SISTEM - PT MARS DATA TELEKOMUNIKASI
+# BUKU PANDUAN SISTEM - PT MARS DATA TELEKOMUNIKASI
 ## DUAL STACK DNS ENGINE
 
 Dokumentasi ini berisi panduan operasional dan teknis untuk sistem DNS Mars Data.
@@ -30,13 +30,22 @@ Dashboard Web GUI menyediakan pemantauan real-time:
 - **Traffic Analysis (Grafik):**
     - **Garis Magenta (Pink):** Menampilkan **QPS (Queries Per Second)** murni per detik.
     - **Area Biru (Cyan):** Menampilkan **Snapshot Queries** (kepadatan query terbaru).
+    - **Fitur Fullscreen:** Gunakan ikon fullscreen di pojok kanan atas grafik untuk tampilan penuh yang responsif di semua perangkat (PC, Laptop, Android, iPhone).
 - **Hardware Monitoring:**
     - **CPU & RAM:** Beban pemrosesan real-time.
     - **HDD Usage:** Pemantauan sisa ruang penyimpanan disk.
 
 ---
 
-### 4. BATASAN PERFORMA (QPS LIMIT)
+### 4. FITUR BARU: RESPONSIVE FULLSCREEN MONITORING
+Sistem kini dilengkapi dengan mode pemantauan layar penuh yang adaptif:
+- **Auto-Scale:** Grafik akan menyesuaikan ukurannya secara otomatis mengikuti orientasi dan ukuran layar perangkat.
+- **Mobile Friendly:** Dioptimalkan untuk iPhone dan Android dengan navigasi "Exit Fullscreen" yang mudah.
+- **High Performance:** Mode fullscreen menggunakan akselerasi GPU browser untuk memastikan render grafik tetap lancar tanpa membebani CPU server.
+
+---
+
+### 5. BATASAN PERFORMA (QPS LIMIT)
 Sistem dikonfigurasi untuk keamanan maksimal terhadap serangan DDoS:
 
 - **Maksimal Forwarding (dnsmasq):** 1.500 query simultan.
@@ -46,13 +55,13 @@ Sistem dikonfigurasi untuk keamanan maksimal terhadap serangan DDoS:
 
 ---
 
-### 5. MANAJEMEN WHITELIST & MALWARE
+### 6. MANAJEMEN WHITELIST & MALWARE
 - **Whitelist:** Domain yang ditambahkan ke Whitelist akan melewati (bypass) semua aturan pemblokiran dan intersepsi.
 - **Malware Shield:** Menggunakan database `/etc/dnsmasq.d/malware.conf` yang diperbarui secara berkala untuk memblokir situs berbahaya.
 
 ---
 
-### 6. PEMELIHARAAN (MAINTENANCE)
+### 7. PEMELIHARAAN (MAINTENANCE)
 - **Log System:** Sistem secara otomatis melakukan rotasi log untuk mencegah kepenuhan disk.
 - **Self-Healing:** Jika layanan `dnsmasq` atau `unbound` mati, `guardian.py` akan mendeteksi dan menghidupkannya kembali dalam hitungan detik.
 

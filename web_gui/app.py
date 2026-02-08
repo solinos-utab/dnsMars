@@ -251,19 +251,44 @@ def index():
 def download_manual_pdf():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
-    path = "/home/dns/Buku_Panduan_DNS_MarsData.pdf"
+    path = "/home/dns/web_gui/static/manual.pdf"
     if os.path.exists(path):
-        return send_file(path, as_attachment=True)
+        return send_file(path, as_attachment=True, download_name="Buku_Panduan_DNS_MarsData.pdf")
     return jsonify({'status': 'error', 'message': 'File not found'}), 404
 
 @app.route('/api/manual/html')
 def view_manual_html():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
-    path = "/home/dns/sistem_dns_marsdata.html"
-    if os.path.exists(path):
-        return send_file(path)
-    return jsonify({'status': 'error', 'message': 'File not found'}), 404
+    # Generate HTML from Markdown on the fly for latest content
+    try:
+        import markdown
+        with open("/home/dns/PANDUAN_SISTEM.md", "r") as f:
+            content = f.read()
+        html_content = markdown.markdown(content, extensions=['extra', 'codehilite'])
+        
+        # Add basic styling to make it look good
+        styled_html = f"""
+        <html>
+        <head>
+            <title>Manual - PT MARS DATA TELEKOMUNIKASI</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+            <style>
+                body {{ font-family: 'Inter', sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }}
+                h1, h2 {{ color: #003399; border-bottom: 2px solid #eee; padding-bottom: 10px; }}
+                code {{ background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-family: monospace; }}
+                pre {{ background: #f4f4f4; padding: 15px; border-radius: 8px; overflow-x: auto; }}
+                hr {{ border: 0; border-top: 1px solid #eee; margin: 40px 0; }}
+            </style>
+        </head>
+        <body>
+            {html_content}
+        </body>
+        </html>
+        """
+        return styled_html
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error generating HTML: {e}'}), 500
 
 def get_iptables_status():
     try:

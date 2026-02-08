@@ -1,26 +1,23 @@
 # Logs
 *.log
-web_gui.log
-guardian.log
-app.log
+/var/log/
 
-# Temporary and Cache
+# Databases
+*.db
+*.sqlite3
+
+# Python
 __pycache__/
-.cache/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# System/Config sensitive (optional, be careful)
+# .bash_history
+# .ssh/
+
+# Temporary files
 *.tmp
-*.bak
-temp_*
-new_netplan.yaml
-
-# Sensitive Data (Passwords and Keys)
-.password.hash
-web_gui/cert.pem
-web_gui/key.pem
-
-# Git specific
-.trae-aicc/
-.trae-server/
+*.swp
 .DS_Store
-
-# Large/PDF files (Optional, keeping them if you want them in backup)
-# Buku_Panduan_DNS_MarsData.pdf

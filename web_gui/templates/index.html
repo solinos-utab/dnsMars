@@ -6,6 +6,8 @@
     <title>PT MARS DATA TELEKOMUNIKASI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -130,6 +132,97 @@
         </div>
     </div>
 
+    <!-- Domain List Modal -->
+    <div id="list-modal" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-xl space-y-6 border border-blue-500/30">
+            <div class="flex justify-between items-center border-b border-white/10 pb-4">
+                <div>
+                    <h2 id="list-modal-title" class="text-2xl font-orbitron text-white">DOMAIN LIST</h2>
+                    <p id="list-modal-subtitle" class="text-blue-400 text-[10px] tracking-widest uppercase">MANAGE ENTRIES</p>
+                </div>
+                <button onclick="closeListModal()" class="text-slate-400 hover:text-white transition p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div id="list-modal-content" class="max-h-[400px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                <!-- List items will be injected here -->
+            </div>
+            <div class="flex justify-end pt-4 border-t border-white/10">
+                <button onclick="closeListModal()" class="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white font-orbitron rounded-xl transition">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Secondary Setup Modal -->
+    <div id="secondary-setup-modal" class="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 backdrop-blur-md hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-3xl space-y-6 border border-orange-500/30 overflow-hidden">
+            <div class="flex justify-between items-center border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-2xl font-orbitron text-white">SECONDARY SETUP</h2>
+                    <p class="text-orange-400 text-[10px] tracking-widest uppercase">HIGH AVAILABILITY CLUSTER GUIDE</p>
+                </div>
+                <button onclick="closeSecondaryModal()" class="text-slate-400 hover:text-white transition p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="space-y-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                <!-- Step 1 -->
+                <div class="space-y-3">
+                    <div class="flex items-center gap-3">
+                        <span class="w-6 h-6 rounded-full bg-orange-500 text-black flex items-center justify-center text-xs font-bold">1</span>
+                        <h3 class="text-sm font-orbitron text-white uppercase">Copy Installer Script</h3>
+                    </div>
+                    <p class="text-[11px] text-slate-400 pl-9">Jalankan perintah ini di VM Secondary untuk mengambil script installer dari VM Primary.</p>
+                    <div class="ml-9 bg-black/40 border border-white/5 rounded-xl p-3 relative group">
+                        <code id="cmd-copy" class="text-[10px] text-blue-300 font-mono break-all block pr-12">scp user@PRIMARY_IP:/home/dns/setup_secondary.sh .</code>
+                        <button onclick="copyText('cmd-copy')" class="absolute right-3 top-3 text-[10px] text-slate-500 hover:text-white transition uppercase font-orbitron">COPY</button>
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="space-y-3">
+                    <div class="flex items-center gap-3">
+                        <span class="w-6 h-6 rounded-full bg-orange-500 text-black flex items-center justify-center text-xs font-bold">2</span>
+                        <h3 class="text-sm font-orbitron text-white uppercase">Run Installation</h3>
+                    </div>
+                    <p class="text-[11px] text-slate-400 pl-9">Gunakan perintah di bawah ini untuk memulai instalasi otomatis dan sinkronisasi awal.</p>
+                    <div class="ml-9 bg-black/40 border border-white/5 rounded-xl p-3 relative group">
+                        <code id="cmd-install" class="text-[10px] text-orange-300 font-mono break-all block pr-12">sudo bash setup_secondary.sh PRIMARY_IP SYNC_TOKEN</code>
+                        <button onclick="copyText('cmd-install')" class="absolute right-3 top-3 text-[10px] text-slate-500 hover:text-white transition uppercase font-orbitron">COPY</button>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="space-y-3">
+                    <div class="flex items-center gap-3">
+                        <span class="w-6 h-6 rounded-full bg-orange-500 text-black flex items-center justify-center text-xs font-bold">3</span>
+                        <h3 class="text-sm font-orbitron text-white uppercase">Verify Sync</h3>
+                    </div>
+                    <p class="text-[11px] text-slate-400 pl-9">Setelah selesai, VM Secondary akan otomatis sinkron setiap 5 menit. Anda dapat memantau log sinkronisasi dengan perintah:</p>
+                    <div class="ml-9 bg-black/40 border border-white/5 rounded-xl p-3 relative group">
+                        <code id="cmd-log" class="text-[10px] text-green-300 font-mono break-all block pr-12">tail -f /var/log/dns_sync.log</code>
+                        <button onclick="copyText('cmd-log')" class="absolute right-3 top-3 text-[10px] text-slate-500 hover:text-white transition uppercase font-orbitron">COPY</button>
+                    </div>
+                </div>
+
+                <div class="ml-9 p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl">
+                    <p class="text-[10px] text-orange-400 leading-relaxed italic">
+                        <strong>Catatan:</strong> Pastikan port 80/443 (Web GUI) di VM Primary dapat diakses oleh VM Secondary untuk proses sinkronisasi database.
+                    </p>
+                </div>
+            </div>
+
+            <div class="flex justify-end pt-4 border-t border-white/10">
+                <button onclick="closeSecondaryModal()" class="px-8 py-3 bg-orange-600 hover:bg-orange-500 text-white font-orbitron rounded-xl transition shadow-lg shadow-orange-900/20">DONE</button>
+            </div>
+        </div>
+    </div>
+
     <div class="max-w-7xl mx-auto">
         <!-- Header -->
         <header class="mb-8 flex flex-col lg:flex-row justify-between items-center gap-6">
@@ -140,10 +233,10 @@
                 <div>
                     <h1 class="text-2xl md:text-3xl font-bold font-orbitron tracking-wider text-white">PT MARS DATA TELEKOMUNIKASI</h1>
                     <div class="flex items-center gap-4 mt-1">
-                        <p class="text-blue-400 font-medium tracking-widest text-xs">DUAL STACK DNS ENGINE</p>
-                        <button onclick="openPasswordModal()" class="text-[9px] text-slate-500 hover:text-purple-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">CHANGE PWD</button>
-                        <button onclick="logout()" class="text-[9px] text-slate-500 hover:text-red-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">LOGOUT</button>
-                    </div>
+                            <p class="text-blue-400 font-medium tracking-widest text-xs">DUAL STACK DNS ENGINE <span id="header-node-role" class="ml-2 text-white bg-blue-600 px-2 py-0.5 rounded text-[8px]">PRIMARY</span></p>
+                            <button onclick="openPasswordModal()" class="text-[9px] text-slate-500 hover:text-purple-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">CHANGE PWD</button>
+                            <button onclick="logout()" class="text-[9px] text-slate-500 hover:text-red-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">LOGOUT</button>
+                        </div>
                 </div>
             </div>
             
@@ -176,6 +269,28 @@
             
             <!-- Left Column: Status & Actions -->
             <div class="lg:col-span-1 space-y-6">
+                <!-- System Role Card -->
+                <div id="role-card" class="glass p-5 rounded-2xl border border-blue-500/20 shadow-lg">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-sm font-orbitron text-blue-400">SYSTEM NODE</h2>
+                        <span id="node-role-badge" class="px-2 py-0.5 rounded text-[9px] font-orbitron bg-blue-500/20 text-blue-400 border border-blue-500/30">PRIMARY</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="switchRole('PRIMARY')" id="btn-role-primary" class="py-2 rounded-lg text-[9px] font-orbitron border border-blue-500 bg-blue-600 text-white transition shadow-lg shadow-blue-900/20">PRIMARY DNS</button>
+                        <button onclick="switchRole('SECONDARY')" id="btn-role-secondary" class="py-2 rounded-lg text-[9px] font-orbitron border border-white/5 bg-slate-800 text-slate-400 hover:bg-slate-700 transition">SECONDARY DNS</button>
+                    </div>
+                    <div id="sync-status-info" class="mt-4 pt-3 border-t border-white/10 hidden">
+                        <div class="flex justify-between items-center text-[9px]">
+                            <span class="text-slate-500">LAST SYNC:</span>
+                            <span id="last-sync-time" class="text-orange-400 font-mono">NEVER</span>
+                        </div>
+                        <div class="flex justify-between items-center text-[9px] mt-1">
+                            <span class="text-slate-500">REMOTE IP:</span>
+                            <span id="remote-node-ip" class="text-blue-400 font-mono">NONE</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Status -->
                 <div class="glass p-5 rounded-2xl space-y-4">
                     <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2">SYSTEM STATUS</h2>
@@ -250,7 +365,18 @@
                             <button onclick="toggleFullscreen('traffic-container')" class="fullscreen-exit-btn text-xs bg-red-500/20 hover:bg-red-500/40 text-red-400 px-3 py-1 rounded-lg border border-red-500/30 transition font-orbitron">EXIT FULLSCREEN</button>
                         </div>
                         <div class="flex items-center gap-3">
-                            <span class="text-[10px] text-blue-400 animate-pulse">● LIVE MONITORING</span>
+                            <div class="flex items-center bg-slate-900/50 rounded-lg p-1 border border-white/5">
+                                <button onclick="setTrafficRange('live')" id="btn-range-live" class="text-[8px] font-orbitron px-2 py-1 rounded transition bg-blue-600 text-white">LIVE</button>
+                                <button onclick="setTrafficRange('daily')" id="btn-range-daily" class="text-[8px] font-orbitron px-2 py-1 rounded transition text-slate-500 hover:text-white">24H</button>
+                                <button onclick="setTrafficRange('monthly')" id="btn-range-monthly" class="text-[8px] font-orbitron px-2 py-1 rounded transition text-slate-500 hover:text-white">30D</button>
+                                <button onclick="setTrafficRange('yearly')" id="btn-range-yearly" class="text-[8px] font-orbitron px-2 py-1 rounded transition text-slate-500 hover:text-white">12M</button>
+                            </div>
+                            <button onclick="downloadTrafficPDF()" class="text-[8px] font-orbitron px-2 py-1.5 rounded bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/40 transition flex items-center gap-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                                </svg>
+                                PDF
+                            </button>
                             <button onclick="toggleFullscreen('traffic-container')" class="text-slate-400 hover:text-white transition p-1" title="Toggle Fullscreen">
                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
@@ -303,7 +429,9 @@
             <div class="lg:col-span-1 space-y-6">
                 <!-- Deep Query Test -->
                 <div class="glass p-5 rounded-2xl space-y-4">
-                    <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2">DEEP QUERY TEST</h2>
+                    <div class="flex justify-between items-center border-b border-white/10 pb-2">
+                        <h2 class="text-sm font-orbitron text-blue-400">DEEP QUERY TEST</h2>
+                    </div>
                     <div class="space-y-3">
                         <div class="flex gap-2">
                             <input type="text" id="domain-input" placeholder="Enter domain..." class="flex-1 bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition">
@@ -316,9 +444,29 @@
                         </div>
                         <div class="grid grid-cols-1 gap-2">
                             <button onclick="runDig()" id="dig-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-orbitron text-[10px] py-2 rounded-lg transition shadow-lg shadow-blue-900/20">EXECUTE QUERY</button>
+                            
                             <div class="grid grid-cols-2 gap-2">
-                                <button onclick="doActionWithDomain('blacklist')" class="bg-red-900/40 hover:bg-red-900/60 text-red-400 border border-red-500/30 font-orbitron text-[10px] py-2 rounded-lg transition">BLACKLIST</button>
-                                <button onclick="doActionWithDomain('whitelist')" class="bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-500/30 font-orbitron text-[10px] py-2 rounded-lg transition">WHITELIST</button>
+                                <button onclick="doActionWithDomain('blacklist')" class="w-full bg-red-900/40 hover:bg-red-900/60 text-red-400 border border-red-500/30 font-orbitron text-[10px] py-2 rounded-lg transition">ADD BLACKLIST</button>
+                                <button onclick="doActionWithDomain('whitelist')" class="w-full bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-500/30 font-orbitron text-[10px] py-2 rounded-lg transition">ADD WHITELIST</button>
+                            </div>
+
+                            <!-- View List Buttons (Prominent) -->
+                            <div class="pt-4 border-t border-white/10 space-y-2">
+                                <p class="text-[9px] text-slate-500 font-orbitron uppercase tracking-widest text-center">DATABASE VIEWER</p>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button onclick="openListModal('blacklist')" class="flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 py-2.5 rounded-xl transition text-[10px] font-orbitron group shadow-lg shadow-red-900/10">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 group-hover:scale-110 transition" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                                        </svg>
+                                        LIST BLACKLIST
+                                    </button>
+                                    <button onclick="openListModal('whitelist')" class="flex items-center justify-center gap-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 py-2.5 rounded-xl transition text-[10px] font-orbitron group shadow-lg shadow-green-900/10">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 group-hover:scale-110 transition" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                                        </svg>
+                                        LIST WHITELIST
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -363,7 +511,29 @@
                     </div>
                     <div class="space-y-2">
                         <input type="text" id="trust-ip-input" placeholder="Trust DNS IP (e.g. 1.1.1.1)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-green-500">
-                        <button onclick="toggleTrust()" class="w-full py-2 bg-green-600/20 hover:bg-green-600/40 border border-green-500/30 rounded-lg text-[10px] font-orbitron text-white transition">UPDATE TRUST DNS</button>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="toggleTrust()" class="w-full py-2 bg-green-600/20 hover:bg-green-600/40 border border-green-500/30 rounded-lg text-[10px] font-orbitron text-white transition">UPDATE TRUST</button>
+                            <button onclick="openTrustScheduleModal()" class="w-full py-2 bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/30 rounded-lg text-[10px] font-orbitron text-white transition">SET SCHEDULE</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Secondary DNS Sync -->
+                <div class="glass p-5 rounded-2xl space-y-4">
+                    <div class="flex justify-between items-center border-b border-white/10 pb-2">
+                        <h2 class="text-sm font-orbitron text-orange-400">SECONDARY DNS SYNC</h2>
+                        <span class="text-[9px] text-orange-500/50 animate-pulse">HA CLUSTER READY</span>
+                    </div>
+                    <div class="space-y-3">
+                        <p class="text-[9px] text-slate-400 leading-relaxed uppercase tracking-tighter">Sync your blacklist/whitelist to another VM automatically.</p>
+                        <div class="bg-slate-950/50 border border-orange-500/20 rounded-xl p-3 space-y-2">
+                            <div class="flex justify-between items-center">
+                                <span class="text-[9px] text-orange-400 font-orbitron">SYNC TOKEN</span>
+                                <button onclick="copyToClipboard('sync-token-text')" class="text-[9px] text-blue-400 hover:underline">COPY</button>
+                            </div>
+                            <code id="sync-token-text" class="block text-[10px] text-white font-mono break-all bg-black/30 p-2 rounded border border-white/5">Loading...</code>
+                        </div>
+                        <button onclick="showSyncInstructions()" class="w-full py-2 bg-orange-600/20 hover:bg-orange-600/40 border border-orange-500/30 rounded-lg text-[10px] font-orbitron text-white transition">HOW TO SETUP SECONDARY</button>
                     </div>
                 </div>
 
@@ -377,6 +547,53 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- DNS Trust Schedule Modal -->
+    <div id="trust-schedule-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] hidden flex items-center justify-center p-4">
+        <div class="glass max-w-md w-full rounded-2xl border border-blue-500/30 shadow-2xl overflow-hidden">
+            <div class="bg-gradient-to-r from-blue-600/20 to-green-600/20 p-5 border-b border-white/10">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h3 class="text-blue-400 font-orbitron text-sm">DNS TRUST SCHEDULER</h3>
+                        <p class="text-[9px] text-slate-500 font-orbitron mt-1 uppercase">Automated Trust Switching</p>
+                    </div>
+                    <button onclick="closeTrustScheduleModal()" class="text-slate-500 hover:text-white transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="p-6 space-y-5">
+                <div class="flex items-center justify-between bg-slate-900/50 p-3 rounded-xl border border-white/5">
+                    <span class="text-[10px] text-slate-300 font-orbitron">ACTIVATE SCHEDULE</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="sched-enabled" class="sr-only peer">
+                        <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-2">
+                        <label class="text-[9px] text-blue-400 font-orbitron">START TIME (JAM)</label>
+                        <input type="time" id="sched-start" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-[9px] text-red-400 font-orbitron">END TIME (JAM)</label>
+                        <input type="time" id="sched-end" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+                    </div>
+                </div>
+
+                <div class="space-y-2">
+                    <label class="text-[9px] text-green-400 font-orbitron">TRUST DNS IP</label>
+                    <input type="text" id="sched-ips" placeholder="e.g. 1.1.1.1, 8.8.4.4" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-green-500">
+                    <p class="text-[8px] text-slate-500">Sistem akan otomatis mengaktifkan DNS Trust pada jam yang ditentukan.</p>
+                </div>
+
+                <button onclick="saveTrustSchedule()" class="w-full py-3 bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-500 hover:to-green-500 text-white font-orbitron text-[10px] rounded-xl transition shadow-lg shadow-blue-900/20">SAVE SCHEDULE SETTINGS</button>
+            </div>
         </div>
     </div>
 
@@ -482,7 +699,8 @@
                         borderWidth: 2, 
                         pointRadius: 0, 
                         fill: true, 
-                        tension: 0.4 
+                        tension: 0.4,
+                        yAxisID: 'y1'
                     },
                     { 
                         label: 'Snapshot Queries', 
@@ -492,19 +710,57 @@
                         borderWidth: 1.5, 
                         pointRadius: 0, 
                         fill: true, 
-                        tension: 0.4 
+                        tension: 0.4,
+                        yAxisID: 'y'
                     }
                 ] 
             },
             options: { 
                 responsive: true, 
                 maintainAspectRatio: false, 
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
                 scales: { 
                     y: { 
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
                         beginAtZero: true, 
                         grid: { color: 'rgba(255, 255, 255, 0.05)' }, 
-                        ticks: { color: '#64748b', font: { size: 10 } } 
+                        ticks: { 
+                            color: '#00f2ff', 
+                            font: { size: 10 },
+                            callback: function(value) {
+                                if (value >= 1000) return (value/1000).toFixed(1) + 'k';
+                                return value;
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'TOTAL QUERIES',
+                            color: '#00f2ff',
+                            font: { size: 9, family: 'Orbitron' }
+                        }
                     }, 
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        beginAtZero: true,
+                        grid: { drawOnChartArea: false }, // only want the grid lines for one axis
+                        ticks: { 
+                            color: '#ff00ff', 
+                            font: { size: 10 } 
+                        },
+                        title: {
+                            display: true,
+                            text: 'QPS',
+                            color: '#ff00ff',
+                            font: { size: 9, family: 'Orbitron' }
+                        }
+                    },
                     x: { 
                         grid: { display: false }, 
                         ticks: { color: '#64748b', font: { size: 10 } } 
@@ -524,6 +780,187 @@
         });
 
         let metricsInterval, trafficInterval;
+        let currentTrafficRange = 'live';
+
+        async function setTrafficRange(range) {
+            currentTrafficRange = range;
+            
+            // Update UI
+            ['live', 'daily', 'monthly', 'yearly'].forEach(r => {
+                const btn = document.getElementById(`btn-range-${r}`);
+                if (r === range) {
+                    btn.classList.add('bg-blue-600', 'text-white');
+                    btn.classList.remove('text-slate-500');
+                } else {
+                    btn.classList.remove('bg-blue-600', 'text-white');
+                    btn.classList.add('text-slate-500');
+                }
+            });
+
+            if (range === 'live') {
+                updateTraffic();
+            } else {
+                fetchTrafficHistory(range);
+            }
+        }
+
+        async function fetchTrafficHistory(range) {
+            try {
+                const res = await fetch(`/api/traffic/history?range=${range}`);
+                const data = await res.json();
+                
+                trafficChart.data.labels = data.map(d => d.time);
+                trafficChart.data.datasets[0].data = data.map(d => d.qps);
+                trafficChart.data.datasets[1].data = data.map(d => d.queries);
+                trafficChart.update();
+            } catch (e) { console.error(e); }
+        }
+
+        async function downloadTrafficPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            // PDF Header
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(18);
+            doc.setTextColor(0, 102, 204);
+            doc.text("PT MARS DATA TELEKOMUNIKASI", 105, 20, { align: "center" });
+            
+            doc.setFontSize(14);
+            doc.setTextColor(50, 50, 50);
+            doc.text("DNS TRAFFIC ANALYSIS REPORT", 105, 30, { align: "center" });
+            
+            doc.setFontSize(10);
+            doc.setFont("helvetica", "normal");
+            doc.text(`Report Type: ${currentTrafficRange.toUpperCase()}`, 20, 45);
+            doc.text(`Generated: ${new Date().toLocaleString()}`, 20, 52);
+            doc.text(`System: DNS MarsData ISP Scale`, 20, 59);
+
+            // Table Data
+            const tableData = trafficChart.data.labels.map((label, i) => [
+                label,
+                trafficChart.data.datasets[0].data[i] + " QPS",
+                trafficChart.data.datasets[1].data[i] + " Queries"
+            ]);
+
+            doc.autoTable({
+                startY: 65,
+                head: [['Period/Time', 'Average QPS', 'Total Queries']],
+                body: tableData,
+                theme: 'grid',
+                headStyles: { fillColor: [0, 242, 255], textColor: [0, 0, 0] },
+                styles: { fontSize: 9 }
+            });
+
+            // Summary Footer
+            const finalY = doc.lastAutoTable.finalY || 70;
+            const avgQps = (trafficChart.data.datasets[0].data.reduce((a, b) => a + b, 0) / tableData.length).toFixed(2);
+            const totalQ = trafficChart.data.datasets[1].data.reduce((a, b) => a + b, 0);
+            
+            doc.setFont("helvetica", "bold");
+            doc.text("Summary:", 20, finalY + 15);
+            doc.setFont("helvetica", "normal");
+            doc.text(`- Period Average QPS: ${avgQps}`, 25, finalY + 22);
+            doc.text(`- Cumulative Queries in Period: ${totalQ}`, 25, finalY + 29);
+
+            doc.save(`DNS_Traffic_Report_${currentTrafficRange}_${new Date().toISOString().slice(0,10)}.pdf`);
+        }
+
+        async function fetchSyncInfo() {
+            try {
+                const res = await fetch('/api/sync/info');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    document.getElementById('sync-token-text').innerText = data.sync_token;
+                    window.primaryIP = data.primary_ip;
+                    window.syncToken = data.sync_token;
+                    
+                    // Update Role UI
+                    updateRoleUI(data.role, data.last_sync, data.secondary_ip);
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function updateRoleUI(role, lastSync, secondaryIp) {
+            const badge = document.getElementById('node-role-badge');
+            const headerBadge = document.getElementById('header-node-role');
+            const btnPrimary = document.getElementById('btn-role-primary');
+            const btnSecondary = document.getElementById('btn-role-secondary');
+            const syncInfo = document.getElementById('sync-status-info');
+            const syncTime = document.getElementById('last-sync-time');
+            const remoteIp = document.getElementById('remote-node-ip');
+            
+            badge.innerText = role;
+            headerBadge.innerText = role;
+            
+            if (role === 'PRIMARY') {
+                headerBadge.className = "ml-2 text-white bg-blue-600 px-2 py-0.5 rounded text-[8px]";
+                badge.className = "px-2 py-0.5 rounded text-[9px] font-orbitron bg-blue-500/20 text-blue-400 border border-blue-500/30";
+                btnPrimary.className = "py-2 rounded-lg text-[9px] font-orbitron border border-blue-500 bg-blue-600 text-white transition shadow-lg shadow-blue-900/20";
+                btnSecondary.className = "py-2 rounded-lg text-[9px] font-orbitron border border-white/5 bg-slate-800 text-slate-400 hover:bg-slate-700 transition";
+                
+                syncInfo.classList.remove('hidden');
+                syncTime.innerText = lastSync || 'NEVER';
+                remoteIp.innerText = secondaryIp || 'NONE';
+            } else {
+                headerBadge.className = "ml-2 text-white bg-orange-600 px-2 py-0.5 rounded text-[8px]";
+                badge.className = "px-2 py-0.5 rounded text-[9px] font-orbitron bg-orange-500/20 text-orange-400 border border-orange-500/30";
+                btnSecondary.className = "py-2 rounded-lg text-[9px] font-orbitron border border-orange-500 bg-orange-600 text-white transition shadow-lg shadow-orange-900/20";
+                btnPrimary.className = "py-2 rounded-lg text-[9px] font-orbitron border border-white/5 bg-slate-800 text-slate-400 hover:bg-slate-700 transition";
+                
+                syncInfo.classList.add('hidden');
+            }
+        }
+
+        async function switchRole(role) {
+            if (!confirm(`SWITCH SYSTEM TO ${role} MODE?`)) return;
+            try {
+                const res = await fetch('/api/system/role', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({role})
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    fetchSyncInfo();
+                }
+            } catch (e) { alert('Failed to switch role'); }
+        }
+
+        function showSyncInstructions() {
+            const primaryIp = window.primaryIP || location.hostname;
+            const syncToken = window.syncToken || 'YOUR_TOKEN';
+            
+            document.getElementById('cmd-copy').innerText = `scp user@${primaryIp}:/home/dns/setup_secondary.sh .`;
+            document.getElementById('cmd-install').innerText = `sudo bash setup_secondary.sh ${primaryIp} ${syncToken}`;
+            
+            document.getElementById('secondary-setup-modal').classList.remove('hidden');
+        }
+
+        function closeSecondaryModal() {
+            document.getElementById('secondary-setup-modal').classList.add('hidden');
+        }
+
+        function copyText(id) {
+            const text = document.getElementById(id).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = event.target;
+                const originalText = btn.innerText;
+                btn.innerText = 'COPIED!';
+                btn.classList.add('text-green-400');
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                    btn.classList.remove('text-green-400');
+                }, 2000);
+            });
+        }
+
+        function copyToClipboard(elementId) {
+            const text = document.getElementById(elementId).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Copied to clipboard!');
+            });
+        }
 
         async function updateMetrics() {
             // Check auth first
@@ -601,6 +1038,7 @@
         }
 
         async function updateTraffic() {
+            if (currentTrafficRange !== 'live') return;
             try {
                 const res = await fetch('/api/traffic');
                 if (res.status === 401) return;
@@ -739,6 +1177,53 @@
                 updateMetrics();
             } catch (e) {
                 alert('Failed to toggle IPv6');
+            }
+        }
+
+        async function openTrustScheduleModal() {
+            try {
+                const res = await fetch('/api/trust/schedule');
+                const data = await res.json();
+                document.getElementById('sched-enabled').checked = data.enabled;
+                document.getElementById('sched-start').value = data.start_time;
+                document.getElementById('sched-end').value = data.end_time;
+                document.getElementById('sched-ips').value = data.trust_ips;
+                document.getElementById('trust-schedule-modal').classList.remove('hidden');
+            } catch (e) {
+                alert('Failed to load schedule');
+            }
+        }
+
+        function closeTrustScheduleModal() {
+            document.getElementById('trust-schedule-modal').classList.add('hidden');
+        }
+
+        async function saveTrustSchedule() {
+            const enabled = document.getElementById('sched-enabled').checked;
+            const start_time = document.getElementById('sched-start').value;
+            const end_time = document.getElementById('sched-end').value;
+            const trust_ips = document.getElementById('sched-ips').value;
+
+            if (!start_time || !end_time || !trust_ips) {
+                alert('Please fill all fields');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/trust/schedule', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ enabled, start_time, end_time, trust_ips })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert('Schedule saved successfully. Guardian will apply it automatically.');
+                    closeTrustScheduleModal();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (e) {
+                alert('Failed to save schedule');
             }
         }
 
@@ -894,9 +1379,79 @@
             } catch (e) { alert('Connection error'); }
         }
 
+        // --- DOMAIN LIST MODAL FUNCTIONS ---
+        async function openListModal(type) {
+            const modal = document.getElementById('list-modal');
+            const title = document.getElementById('list-modal-title');
+            const subtitle = document.getElementById('list-modal-subtitle');
+            const content = document.getElementById('list-modal-content');
+
+            title.innerText = type.toUpperCase() + ' LIST';
+            subtitle.innerText = 'MANAGE SYSTEM ' + type.toUpperCase();
+            content.innerHTML = '<p class="text-[10px] text-slate-500 text-center py-4 animate-pulse font-orbitron">FETCHING DATABASE...</p>';
+            modal.classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/list/${type}`);
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    if (data.domains.length === 0) {
+                        content.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">No entries found in this list.</p>';
+                    } else {
+                        content.innerHTML = data.domains.map(domain => `
+                            <div class="flex justify-between items-center bg-white/5 border border-white/5 rounded-xl px-4 py-3 hover:bg-white/10 transition group">
+                                <span class="text-xs font-mono text-white">${domain}</span>
+                                <button onclick="removeDomainFromList('${type}', '${domain}')" class="text-red-500/50 hover:text-red-500 transition-all p-2 hover:scale-110">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                            </div>
+                        `).join('');
+                    }
+                } else {
+                    content.innerHTML = `<p class="text-red-400 text-xs text-center py-8">Error: ${data.message}</p>`;
+                }
+            } catch (e) {
+                content.innerHTML = '<p class="text-red-400 text-xs text-center py-8">Connection failed.</p>';
+            }
+        }
+
+        function closeListModal() {
+            document.getElementById('list-modal').classList.add('hidden');
+        }
+
+        async function removeDomainFromList(type, domain) {
+            if (!confirm(`REMOVE ${domain} FROM ${type.toUpperCase()}?`)) return;
+            
+            try {
+                const res = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: type, // 'blacklist' or 'whitelist'
+                        action: 'remove',
+                        domain: domain
+                    })
+                });
+                
+                const result = await res.json();
+                if (result.status === 'success') {
+                    // Refresh the list
+                    openListModal(type);
+                } else {
+                    alert('Failed: ' + result.message);
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+        }
+
         // Initialize
         updateMetrics();
         fetchBannedIps();
+        fetchSyncInfo();
         setInterval(fetchBannedIps, 10000);
     </script>
 </body>

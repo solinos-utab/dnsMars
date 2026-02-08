@@ -21,7 +21,10 @@ mkdir -p /home/dns/web_gui/templates
 # 3. Configure DNS (dnsmasq & unbound)
 echo "⚙️ Configuring DNS services..."
 # Move local configs to system directories
-sudo cp /home/dns/dnsmasq_smartdns.conf /etc/dnsmasq.d/smartdns.conf
+sudo cp /home/dns/dnsmasq_base.conf /etc/dnsmasq.d/00-base.conf
+if [ ! -f /etc/dnsmasq.d/upstream.conf ]; then
+    echo -e "server=8.8.8.8\nserver=1.1.1.1" | sudo tee /etc/dnsmasq.d/upstream.conf
+fi
 sudo cp /home/dns/unbound_smartdns.conf /etc/unbound/unbound.conf.d/smartdns.conf
 
 # 4. Setup Firewall

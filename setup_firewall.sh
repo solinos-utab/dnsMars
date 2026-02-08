@@ -141,14 +141,14 @@ ip6tables -A INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
       ip6tables -A INPUT -s "$subnet" -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
   done
 
-  # DNS Flood Protection (UDP Port 53) - Ditingkatkan untuk trafik besar
-  # Per-IP Limit: 5.000 QPS (Burst 2.000)
+  # DNS Flood Protection (UDP Port 53) - Ditingkatkan untuk ISP (5.000 QPS per IP)
     iptables -A INPUT -p udp --dport 53 -m hashlimit --hashlimit-name dns_flood --hashlimit-upto 5000/sec --hashlimit-burst 2000 --hashlimit-mode srcip --hashlimit-htable-expire 120000 -j ACCEPT
     
-    # Global Limit: Sangat Tinggi (100.000 QPS total sebagai pengaman hardware)
+    # Global Limit: Tinggi (100.000 QPS total sebagai pengaman hardware)
     iptables -A INPUT -p udp --dport 53 -m hashlimit --hashlimit-name dns_global --hashlimit-upto 100000/sec --hashlimit-burst 120000 --hashlimit-htable-expire 30000 -j ACCEPT
 
-   # IPv6 DNS Allow (Sederhana untuk sekarang, bisa ditambah hashlimit jika perlu)
+   # IPv6 DNS Flood Protection
+   ip6tables -A INPUT -p udp --dport 53 -m hashlimit --hashlimit-name dns6_flood --hashlimit-upto 5000/sec --hashlimit-burst 2000 --hashlimit-mode srcip --hashlimit-htable-expire 120000 -j ACCEPT 2>/dev/null || true
    ip6tables -A INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || true
    ip6tables -A INPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
 

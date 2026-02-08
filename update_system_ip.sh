@@ -2,7 +2,7 @@
 # Script to update hardcoded IPs in configuration files
 
 # Detect current (soon to be old) IP from config before updating
-OLD_IP=$(grep -oP 'address=/dns.mdnet.co.id/\K\S+' /home/dns/dnsmasq_smartdns.conf)
+OLD_IP=$(grep -oP 'address=/dns.mdnet.co.id/\K\S+' /home/dns/dnsmasq_base.conf)
 
 # Retry IP detection for up to 15 seconds (after netplan apply)
 for i in {1..15}; do
@@ -30,11 +30,11 @@ fi
 echo "Detected New IP: $NEW_IP"
 echo "Updating configuration files..."
 
-# 1. Update dnsmasq_smartdns.conf
-sudo sed -i "s|address=/dns.mdnet.co.id/.*|address=/dns.mdnet.co.id/$NEW_IP|" /home/dns/dnsmasq_smartdns.conf
+# 1. Update dnsmasq_base.conf
+sudo sed -i "s|address=/dns.mdnet.co.id/.*|address=/dns.mdnet.co.id/$NEW_IP|" /home/dns/dnsmasq_base.conf
 # Update PTR record (reversed IP)
 REVERSED_IP=$(echo $NEW_IP | awk -F. '{print $4"."$3"."$2"."$1}')
-sudo sed -i "s|ptr-record=.*.in-addr.arpa,dns.mdnet.co.id|ptr-record=$REVERSED_IP.in-addr.arpa,dns.mdnet.co.id|" /home/dns/dnsmasq_smartdns.conf
+sudo sed -i "s|ptr-record=.*.in-addr.arpa,dns.mdnet.co.id|ptr-record=$REVERSED_IP.in-addr.arpa,dns.mdnet.co.id|" /home/dns/dnsmasq_base.conf
 
 # 2. Update unbound_smartdns.conf
 sudo sed -i "s|local-data: \"dns.mdnet.co.id. IN A .*\"|local-data: \"dns.mdnet.co.id. IN A $NEW_IP\"|" /home/dns/unbound_smartdns.conf

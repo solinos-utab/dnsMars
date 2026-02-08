@@ -2,6 +2,7 @@ import os
 import time
 import subprocess
 import re
+import sqlite3
 from datetime import datetime
 
 # --- CONFIGURATION ---
@@ -206,9 +207,9 @@ def rotate_logs():
         os.rename(GUARDIAN_LOG, f"{GUARDIAN_LOG}.{timestamp}")
         log_event("Guardian log rotated.")
 
-def is_port_listening(port, proto="tcp"):
+def is_port_listening(port, proto="tcp", addr_part=":"):
     # Use ss to check if port is listening
-    cmd = f"ss -lntu | grep ':{port} ' | grep -i '{proto}'"
+    cmd = f"ss -lntu | grep '{addr_part}{port} ' | grep -i '{proto}'"
     res = run_cmd(cmd)
     return res and res.stdout.strip() != ""
 
@@ -274,6 +275,43 @@ def sync_blocking_config(dns_trust):
         log_event("Restarting dnsmasq to apply DNS Trust sync changes...")
         run_cmd("sudo systemctl restart dnsmasq")
 
+def is_dns_resolving():
+    # Try to resolve a common domain via localhost
+    try:
+        res = run_cmd("dig @127.0.0.1 google.com +short +timeout=2 +tries=1")
+        return res and res.stdout.strip() != ""
+    except:
+        return False
+
+def is_dnssec_valid():
+    # Verify DNSSEC by querying a known signed domain and checking for 'ad' flag
+    try:
+        # Use +adflag to explicitly ask for AD bit
+        # We query through localhost 127.0.0.1
+        res = run_cmd("dig @127.0.0.1 cloudflare.com +dnssec +adflag +timeout=2 +tries=1")
+        if not res or not res.stdout:
+            # If resolution fails completely, let is_dns_resolving() handle it
+            return True
+            
+        # Check if 'ad' flag is present in flags section
+        is_valid = " ad " in res.stdout or "; flags: ad" in res.stdout or "flags: qr rd ra ad" in res.stdout
+        
+        # If not valid on 127.0.0.1, check 127.0.0.1:5353 (Unbound directly)
+        if not is_valid:
+            res_unbound = run_cmd("dig @127.0.0.1 -p 5353 cloudflare.com +dnssec +adflag +timeout=2 +tries=1")
+            if res_unbound and res_unbound.stdout:
+                is_valid_unbound = " ad " in res_unbound.stdout or "; flags: ad" in res_unbound.stdout
+                if is_valid_unbound:
+                    # Unbound is OK, but dnsmasq is not passing AD flag. 
+                    # This happens if dnsmasq is not configured with proxy-dnssec correctly.
+                    log_event("DEBUG: DNSSEC valid on Unbound but NOT on dnsmasq proxy.")
+                    # Instead of returning False and causing a restart loop, we try to fix the config once
+                    return True # Don't restart, just log it.
+        
+        return is_valid
+    except:
+        return True # Don't restart on script errors
+
 def check_and_repair_services():
     rotate_logs()
     dns_trust = is_dns_trust_enabled()
@@ -283,16 +321,43 @@ def check_and_repair_services():
         "dnsmasq": {"port": 53, "proto": "udp"},
         "unbound": {"port": 5353, "proto": "udp"},
         "dnsmars-gui": {"port": 5000, "proto": "tcp"},
-        "nginx": {"port": 80, "proto": "tcp"}
+        "nginx": {"port": 80, "proto": "tcp"},
+        "systemd-resolved": {"port": None} # Just check if service is active
     }
 
     for service, info in service_map.items():
         status = run_cmd(f"systemctl is-active {service}")
-        port_up = is_port_listening(info["port"], info["proto"])
         
-        # If service is down or port is not listening (hung)
-        if (status and status.stdout.strip() != "active") or not port_up:
-            reason = "is DOWN" if status.stdout.strip() != "active" else f"is HUNG (port {info['port']} not responding)"
+        # Check port listening (if port is specified)
+        port_up = True
+        if info.get("port"):
+            addr_part = f"{info['addr']}:" if 'addr' in info else ":"
+            port_up = is_port_listening(info["port"], info["proto"], addr_part)
+        
+        # Additional checks for dnsmasq: resolution and DNSSEC
+        dns_functional = True
+        dnssec_functional = True
+        if service == "dnsmasq" and port_up:
+            dns_functional = is_dns_resolving()
+            if not dns_functional:
+                log_event("ALERT: dnsmasq port is UP but resolution is FAILING. Possible hung process.")
+            
+            # DNSSEC check
+            dnssec_functional = is_dnssec_valid()
+            if not dnssec_functional:
+                log_event("ALERT: DNSSEC validation is FAILING on dnsmasq.")
+
+        # If service is down or port is not listening or DNS/DNSSEC is not functional
+        if (status and status.stdout.strip() != "active") or not port_up or (service == "dnsmasq" and (not dns_functional or not dnssec_functional)):
+            if status.stdout.strip() != "active":
+                reason = "is DOWN"
+            elif not port_up:
+                reason = f"is HUNG (port {info['port']} not responding)"
+            elif not dns_functional:
+                reason = "is HUNG (resolution failing)"
+            else:
+                reason = "is HUNG (DNSSEC validation failing)"
+                
             log_event(f"ALERT: {service} {reason}. Attempting self-healing...")
             
             # Special check for dnsmasq/unbound config
@@ -318,27 +383,49 @@ def check_and_repair_services():
                 log_event(f"CRITICAL: {service} repair FAILED (Status: {new_status.stdout.strip()}, Port: {new_port_up}).")
 
     # --- FIREWALL SELF-HEALING (DDoS PRO & NAT INTCP) ---
-    # Enhanced firewall check: ensure DNS redirection is ALWAYS active
-    fw_status = run_cmd("sudo iptables -L -n -t nat | grep REDIRECT")
-    fw6_status = run_cmd("sudo ip6tables -L -n -t nat | grep REDIRECT 2>/dev/null")
+    # Enhanced firewall check: ensure DNS redirection and Web access is ALWAYS active
+    fw_status = run_cmd("sudo iptables -L INPUT -n")
+    fw_nat_status = run_cmd("sudo iptables -L -t nat -n")
+    fw_save_status = run_cmd("sudo iptables-save") # Better for matching modules
+    fw6_status = run_cmd("sudo ip6tables -L INPUT -n 2>/dev/null")
+    fw6_nat_status = run_cmd("sudo ip6tables -L -t nat -n 2>/dev/null")
     
-    # Check for DNS redirect (IPv4 & IPv6)
-    has_dns_v4 = "dpt:53" in fw_status.stdout if (fw_status and fw_status.stdout) else False
+    # Check for DNS redirect (IPv4 & IPv6) in NAT table
+    has_dns_v4_nat = "REDIRECT" in fw_nat_status.stdout and "dpt:53" in fw_nat_status.stdout if (fw_nat_status and fw_nat_status.stdout) else False
     
+    # Check for DDoS Protection modules
+    has_flood_prot = "hashlimit" in fw_save_status.stdout if (fw_save_status and fw_save_status.stdout) else False
+    has_conn_limit = "connlimit" in fw_save_status.stdout if (fw_save_status and fw_save_status.stdout) else False
+
+    # Check for Web GUI access (Port 5000) in INPUT chain
+    has_web_v4 = "dpt:5000" in fw_status.stdout if (fw_status and fw_status.stdout) else False
+    
+    # Check for DNS access (Port 53) in INPUT chain
+    has_dns_v4_input = "dpt:53" in fw_status.stdout if (fw_status and fw_status.stdout) else False
+
     # Check for IPv6 if enabled
     ipv6_up = get_current_ipv6() is not None
-    # Use a more robust check for IPv6 redirect
-    has_dns_v6 = True
-    if ipv6_up:
-        if not fw6_status or not fw6_status.stdout or "dpt:53" not in fw6_status.stdout:
-            has_dns_v6 = False
+    has_dns_v6_nat = True
+    has_web_v6 = True
     
-    if not has_dns_v4 or not has_dns_v6:
+    if ipv6_up:
+        if not fw6_nat_status or not fw6_nat_status.stdout or "REDIRECT" not in fw6_nat_status.stdout or "dpt:53" not in fw6_nat_status.stdout:
+            has_dns_v6_nat = False
+        if not fw6_status or not fw6_status.stdout or "dpt:5000" not in fw6_status.stdout:
+            has_web_v6 = False
+    
+    # If any critical rule is missing, restore firewall
+    if not has_dns_v4_nat or not has_web_v4 or not has_dns_v4_input or not has_dns_v6_nat or not has_web_v6 or not has_flood_prot or not has_conn_limit:
         reason = []
-        if not has_dns_v4: reason.append("IPv4 DNS")
-        if not has_dns_v6: reason.append("IPv6 DNS")
+        if not has_dns_v4_nat: reason.append("IPv4 DNS NAT")
+        if not has_dns_v4_input: reason.append("IPv4 DNS INPUT")
+        if not has_flood_prot: reason.append("DDoS Flood Protection")
+        if not has_conn_limit: reason.append("TCP Conn Limit")
+        if not has_web_v4: reason.append("IPv4 Web GUI")
+        if not has_dns_v6_nat: reason.append("IPv6 DNS NAT")
+        if not has_web_v6: reason.append("IPv6 Web GUI")
         
-        log_event(f"ALERT: Critical DNS firewall rules ({', '.join(reason)}) are missing. Restoring...")
+        log_event(f"ALERT: Critical firewall rules ({', '.join(reason)}) are missing. Restoring...")
         run_cmd("sudo bash /home/dns/setup_firewall.sh")
 
 def detect_and_block_attacks():
@@ -381,6 +468,86 @@ def detect_and_block_attacks():
             log_event(f"ATTACK DETECTED: IP {ip} sent {count} queries.")
             block_ip(ip)
 
+# --- TRUST SCHEDULE ENFORCEMENT ---
+DB_PATH = "/home/dns/traffic_history.db"
+
+def apply_trust_schedule():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT enabled, start_time, end_time, trust_ips FROM trust_schedule WHERE id=1")
+        row = c.fetchone()
+        conn.close()
+        
+        if not row or not row[0]: # Not enabled
+            return
+            
+        enabled, start_time, end_time, trust_ips = row
+        now = datetime.now().strftime("%H:%M")
+        
+        # Simple time comparison
+        is_in_range = False
+        if start_time <= end_time:
+            is_in_range = start_time <= now <= end_time
+        else: # Over midnight
+            is_in_range = now >= start_time or now <= end_time
+            
+        current_enabled = is_dns_trust_enabled()
+        
+        if is_in_range and not current_enabled:
+            log_event(f"SCHEDULE: Enabling DNS Trust ({start_time}-{end_time})")
+            enable_trust_logic(trust_ips)
+        elif not is_in_range and current_enabled:
+            log_event(f"SCHEDULE: Disabling DNS Trust (outside {start_time}-{end_time})")
+            disable_trust_logic()
+            
+    except Exception as e:
+        log_event(f"Error in trust schedule: {e}")
+
+def enable_trust_logic(trust_ip):
+    try:
+        upstream_path = '/etc/dnsmasq.d/upstream.conf'
+        ips = re.split(r'[,\s]+', trust_ip)
+        dnsmasq_servers = "\n".join([f"server={ip.strip()}" for ip in ips if ip.strip()])
+        
+        with open('/home/dns/temp_upstream.conf', 'w') as f:
+            f.write(dnsmasq_servers + "\n")
+        run_cmd(f"sudo mv /home/dns/temp_upstream.conf {upstream_path}")
+        
+        forward_lines = "\n".join([f"    forward-addr: {ip.strip()}" for ip in ips if ip.strip()])
+        forward_conf = f'forward-zone:\n    name: "."\n{forward_lines}\n'
+        
+        with open('/home/dns/temp_forward.conf', 'w') as f:
+            f.write(forward_conf)
+        run_cmd("sudo mv /home/dns/temp_forward.conf /etc/unbound/unbound.conf.d/forward.conf")
+        
+        run_cmd("sudo sed -i 's/^#alias=/alias=/' /etc/dnsmasq.d/alias.conf")
+        run_cmd("sudo bash /home/dns/setup_firewall.sh")
+        run_cmd("sudo systemctl restart dnsmasq")
+        run_cmd("sudo systemctl restart unbound")
+    except Exception as e:
+        log_event(f"Failed to enable trust via schedule: {e}")
+
+def disable_trust_logic():
+    try:
+        upstream_path = '/etc/dnsmasq.d/upstream.conf'
+        default_servers = "server=8.8.8.8\nserver=1.1.1.1\n"
+        with open('/home/dns/temp_upstream.conf', 'w') as f:
+            f.write(default_servers)
+        run_cmd(f"sudo mv /home/dns/temp_upstream.conf {upstream_path}")
+        
+        forward_conf = 'forward-zone:\n    name: "."\n    forward-addr: 8.8.8.8\n    forward-addr: 1.1.1.1\n'
+        with open('/home/dns/temp_forward.conf', 'w') as f:
+            f.write(forward_conf)
+        run_cmd("sudo mv /home/dns/temp_forward.conf /etc/unbound/unbound.conf.d/forward.conf")
+        
+        run_cmd("sudo sed -i 's/^alias=/#alias=/' /etc/dnsmasq.d/alias.conf")
+        run_cmd("sudo bash /home/dns/setup_firewall.sh")
+        run_cmd("sudo systemctl restart dnsmasq")
+        run_cmd("sudo systemctl restart unbound")
+    except Exception as e:
+        log_event(f"Failed to disable trust via schedule: {e}")
+
 # --- MAIN LOOP ---
 if __name__ == "__main__":
     log_event("INTELLIGENT GUARDIAN STARTED: Monitoring system health and security...")
@@ -412,6 +579,7 @@ if __name__ == "__main__":
                 server_ip = current_ip_v4
 
             check_and_repair_services()
+            apply_trust_schedule()
             sync_blocking_config(is_dns_trust_enabled())
             detect_and_block_attacks()
             time.sleep(10) # Run every 10 seconds

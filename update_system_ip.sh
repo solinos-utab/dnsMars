@@ -41,7 +41,7 @@ sudo sed -i "s|local-data: \"dns.mdnet.co.id. IN A .*\"|local-data: \"dns.mdnet.
 sudo sed -i "s|local-data-ptr: \".* dns.mdnet.co.id\"|local-data-ptr: \"$NEW_IP dns.mdnet.co.id\"|" /home/dns/unbound_smartdns.conf
 
 # 3. Update all dnsmasq configs that use redirects to server IP
-for conf in /etc/dnsmasq.d/blacklist.conf /etc/dnsmasq.d/malware.conf /etc/dnsmasq.d/captive_portal.conf; do
+for conf in /etc/dnsmasq.d/blacklist.conf /etc/dnsmasq.d/malware.conf; do
     if [ -f "$conf" ]; then
         echo "Updating redirects in $conf..."
         sudo sed -i "s|/[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}$|/$NEW_IP|" "$conf"

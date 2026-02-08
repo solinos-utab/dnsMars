@@ -282,7 +282,8 @@ def check_and_repair_services():
     service_map = {
         "dnsmasq": {"port": 53, "proto": "udp"},
         "unbound": {"port": 5353, "proto": "udp"},
-        "dnsmars-gui": {"port": 5000, "proto": "tcp"}
+        "dnsmars-gui": {"port": 5000, "proto": "tcp"},
+        "nginx": {"port": 80, "proto": "tcp"}
     }
 
     for service, info in service_map.items():
@@ -317,33 +318,24 @@ def check_and_repair_services():
                 log_event(f"CRITICAL: {service} repair FAILED (Status: {new_status.stdout.strip()}, Port: {new_port_up}).")
 
     # --- FIREWALL SELF-HEALING (DDoS PRO & NAT INTCP) ---
-    # Enhanced firewall check: look for specific redirect rules (IPv4 & IPv6)
-    if dns_trust:
-        fw_status = run_cmd("sudo iptables -L -n -t nat | grep REDIRECT")
-        fw6_status = run_cmd("sudo ip6tables -L -n -t nat | grep REDIRECT 2>/dev/null")
+    # Enhanced firewall check: ensure DNS redirection is ALWAYS active
+    fw_status = run_cmd("sudo iptables -L -n -t nat | grep REDIRECT")
+    fw6_status = run_cmd("sudo ip6tables -L -n -t nat | grep REDIRECT 2>/dev/null")
+    
+    # Check for DNS redirect (IPv4 & IPv6)
+    has_dns_v4 = "dpt:53" in fw_status.stdout if fw_status else False
+    
+    # Check for IPv6 if enabled
+    ipv6_up = get_current_ipv6() is not None
+    has_dns_v6 = "dpt:53" in fw6_status.stdout if (fw6_status and ipv6_up) else not ipv6_up
+    
+    if not has_dns_v4 or not has_dns_v6:
+        reason = []
+        if not has_dns_v4: reason.append("IPv4 DNS")
+        if not has_dns_v6: reason.append("IPv6 DNS")
         
-        # Check for DNS redirect and HTTP/HTTPS redirect (IPv4)
-        has_dns_v4 = "dpt:53" in fw_status.stdout if fw_status else False
-        has_http_v4 = "dpt:80" in fw_status.stdout if fw_status else False
-        
-        # Check for IPv6 if enabled
-        ipv6_up = get_current_ipv6() is not None
-        has_dns_v6 = "dpt:53" in fw6_status.stdout if (fw6_status and ipv6_up) else not ipv6_up
-        
-        if not has_dns_v4 or not has_http_v4 or not has_dns_v6:
-            reason = []
-            if not has_dns_v4: reason.append("IPv4 DNS")
-            if not has_http_v4: reason.append("IPv4 HTTP")
-            if not has_dns_v6: reason.append("IPv6 DNS")
-            
-            log_event(f"ALERT: DNS Trust is ENABLED but critical firewall rules ({', '.join(reason)}) are missing. Restoring...")
-            run_cmd("sudo bash /home/dns/setup_firewall.sh")
-    else:
-        # If DNS Trust is disabled, ensure no REDIRECT rules exist
-        fw_status = run_cmd("sudo iptables -L -n -t nat | grep REDIRECT")
-        if fw_status and "53" in fw_status.stdout:
-            log_event("ALERT: DNS Trust is DISABLED but firewall rules are still active. Cleaning up...")
-            run_cmd("sudo bash /home/dns/setup_firewall.sh")
+        log_event(f"ALERT: Critical DNS firewall rules ({', '.join(reason)}) are missing. Restoring...")
+        run_cmd("sudo bash /home/dns/setup_firewall.sh")
 
 def detect_and_block_attacks():
     if not is_dns_trust_enabled():

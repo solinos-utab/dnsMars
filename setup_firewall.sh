@@ -195,32 +195,11 @@ done
 iptables -t nat -A PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 53
 
 # --- HTTP/HTTPS INTERCEPTION UNTUK HALAMAN BLOKIR ---
-# Redirect trafik HTTP (port 80) dan HTTPS (port 443)
-for ip in "${ALLOWED_IPS[@]}"; do
-    [ ! -z "$ip" ] && iptables -t nat -A PREROUTING -p tcp -s "$ip" -m multiport --dports 80,443 -j ACCEPT
-done
+# Note: Intersepsi agresif port 80/443 dinonaktifkan untuk menghindari "Sign in to network" popup pada mobile.
+# Halaman blokir tetap bekerja melalui resolusi DNS ke IP server.
 
-# --- Bypassing Whitelisted Domains from Interception ---
-DNSMASQ_WHITELIST="/etc/dnsmasq.d/whitelist.conf"
-if [ -f "$DNSMASQ_WHITELIST" ]; then
-    echo "Adding destination bypass for whitelisted domains..."
-    # Extract domains from server=/domain/ip format
-    DOMAINS=$(grep -oP 'server=/\K[^/]+' "$DNSMASQ_WHITELIST")
-    for domain in $DOMAINS; do
-        echo "Resolving and bypassing $domain..."
-        # Resolve domain to IPs (IPv4)
-        IPS=$(dig +short "$domain" A | grep -E '^[0-9.]+$')
-        for ip in $IPS; do
-            if [ ! -z "$ip" ]; then
-                echo "  -> Bypassing IP: $ip"
-                iptables -t nat -A PREROUTING -p tcp -d "$ip" -m multiport --dports 80,443 -j ACCEPT
-            fi
-        done
-    done
-fi
-
-iptables -t nat -A PREROUTING -p tcp --dport 80 ! -d $SERVER_IP -j REDIRECT --to-ports 80
-iptables -t nat -A PREROUTING -p tcp --dport 443 ! -d $SERVER_IP -j REDIRECT --to-ports 443
+iptables -t nat -A PREROUTING -p tcp --dport 80 -d $SERVER_IP -j ACCEPT
+iptables -t nat -A PREROUTING -p tcp --dport 443 -d $SERVER_IP -j ACCEPT
 
 # IPv6 HTTP/HTTPS Redirect
 if [ ! -z "$SERVER_IPV6" ]; then

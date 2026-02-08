@@ -2,9 +2,14 @@
 *.log
 /var/log/
 
+# Trae
+.trae-server/
+.trae/
+
 # Databases
 *.db
 *.sqlite3
+*.hash
 
 # Python
 __pycache__/

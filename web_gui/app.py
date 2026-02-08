@@ -249,8 +249,7 @@ def index():
 
 @app.route('/api/manual/pdf')
 def download_manual_pdf():
-    if not is_authenticated():
-        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    # Public access for manual
     path = "/home/dns/web_gui/static/manual.pdf"
     if os.path.exists(path):
         return send_file(path, as_attachment=True, download_name="Buku_Panduan_DNS_MarsData.pdf")
@@ -258,8 +257,7 @@ def download_manual_pdf():
 
 @app.route('/api/manual/html')
 def view_manual_html():
-    if not is_authenticated():
-        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    # Public access for manual
     # Generate HTML from Markdown on the fly for latest content
     try:
         import markdown
@@ -276,13 +274,18 @@ def view_manual_html():
             <style>
                 body {{ font-family: 'Inter', sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #333; }}
                 h1, h2 {{ color: #003399; border-bottom: 2px solid #eee; padding-bottom: 10px; }}
+                h3 {{ color: #0044cc; margin-top: 30px; }}
                 code {{ background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-family: monospace; }}
-                pre {{ background: #f4f4f4; padding: 15px; border-radius: 8px; overflow-x: auto; }}
+                pre {{ background: #f4f4f4; padding: 15px; border-radius: 8px; overflow-x: auto; border: 1px solid #ddd; }}
                 hr {{ border: 0; border-top: 1px solid #eee; margin: 40px 0; }}
+                .footer {{ margin-top: 50px; font-size: 0.8em; color: #777; text-align: center; border-top: 1px solid #eee; padding-top: 20px; }}
             </style>
         </head>
         <body>
             {html_content}
+            <div class="footer">
+                &copy; 2026 PT MARS DATA TELEKOMUNIKASI
+            </div>
         </body>
         </html>
         """
@@ -738,7 +741,11 @@ def action():
             dnsmasq_servers = "\n".join([f"server={ip.strip()}" for ip in ips if ip.strip()])
             # Add proxy-dnssec as well
             dnsmasq_servers += "\nproxy-dnssec\n"
-            run_command(f"echo '{dnsmasq_servers}' | sudo tee {smartdns_path}")
+            
+            # Use a temp file for dnsmasq smartdns.conf to avoid shell escaping issues
+            with open('/home/dns/temp_smartdns.conf', 'w') as f:
+                f.write(dnsmasq_servers)
+            run_command(f"sudo mv /home/dns/temp_smartdns.conf {smartdns_path}")
             
             # Also update Unbound to use trust servers
             forward_lines = "\n".join([f"    forward-addr: {ip.strip()}" for ip in ips if ip.strip()])
@@ -751,7 +758,8 @@ def action():
             
             # Re-enable aliases if they were disabled
             run_command("sudo sed -i 's/^#alias=/alias=/' /etc/dnsmasq.d/alias.conf")
-            run_command("sudo sed -i 's/^#filter-AAAA/filter-AAAA/' /etc/dnsmasq.d/alias.conf")
+            # KEEP filter-AAAA commented to support IPv6
+            # run_command("sudo sed -i 's/^#filter-AAAA/filter-AAAA/' /etc/dnsmasq.d/alias.conf")
             
             # Apply firewall rules immediately
             run_command("sudo bash /home/dns/setup_firewall.sh")
@@ -759,7 +767,9 @@ def action():
         else:
             # Revert to default upstreams (Google/Cloudflare) in smartdns.conf
             default_servers = "server=8.8.8.8\nserver=1.1.1.1\n"
-            run_command(f"echo '{default_servers}' | sudo tee {smartdns_path}")
+            with open('/home/dns/temp_smartdns.conf', 'w') as f:
+                f.write(default_servers)
+            run_command(f"sudo mv /home/dns/temp_smartdns.conf {smartdns_path}")
             
             # Revert Unbound to default
             forward_conf = 'forward-zone:\n    name: "."\n    forward-addr: 8.8.8.8\n    forward-addr: 1.1.1.1\n'

@@ -188,11 +188,23 @@ for ip in "${ALLOWED_IPS[@]}"; do
 done
 iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53
 
+# Redirect trafik UDP port 53 (DNS) IPv6
+for ip in "${ALLOWED_IPS_V6[@]}"; do
+    [ ! -z "$ip" ] && ip6tables -t nat -A PREROUTING -p udp -s "$ip" --dport 53 -j ACCEPT 2>/dev/null
+done
+ip6tables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null
+
 # Redirect trafik TCP port 53 (DNS)
 for ip in "${ALLOWED_IPS[@]}"; do
     [ ! -z "$ip" ] && iptables -t nat -A PREROUTING -p tcp -s "$ip" --dport 53 -j ACCEPT
 done
 iptables -t nat -A PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 53
+
+# Redirect trafik TCP port 53 (DNS) IPv6
+for ip in "${ALLOWED_IPS_V6[@]}"; do
+    [ ! -z "$ip" ] && ip6tables -t nat -A PREROUTING -p tcp -s "$ip" --dport 53 -j ACCEPT 2>/dev/null
+done
+ip6tables -t nat -A PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null
 
 # --- HTTP/HTTPS INTERCEPTION UNTUK HALAMAN BLOKIR ---
 # Note: Intersepsi agresif port 80/443 dinonaktifkan untuk menghindari "Sign in to network" popup pada mobile.

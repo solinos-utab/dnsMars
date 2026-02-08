@@ -246,7 +246,7 @@ def sync_blocking_config(dns_trust):
             for line in lines:
                 clean_line = line.strip()
                 # Skip comments that are headers or empty lines
-                if not clean_line or (clean_line.startswith('#') and not clean_line[1:].strip().startswith(('address=', 'alias=', 'filter-AAAA'))):
+                if not clean_line or (clean_line.startswith('#') and not clean_line[1:].strip().startswith(('address=', 'alias='))):
                     new_lines.append(line)
                     continue
                 
@@ -254,7 +254,7 @@ def sync_blocking_config(dns_trust):
                 # because the user expects the block page and local blacklist to work
                 if clean_line.startswith('#'):
                     rule_content = clean_line[1:].strip()
-                    if rule_content.startswith(('address=', 'alias=', 'filter-AAAA')):
+                    if rule_content.startswith(('address=', 'alias=')):
                         new_lines.append(line.lstrip('#').lstrip())
                         file_changed = True
                     else:
@@ -323,11 +323,15 @@ def check_and_repair_services():
     fw6_status = run_cmd("sudo ip6tables -L -n -t nat | grep REDIRECT 2>/dev/null")
     
     # Check for DNS redirect (IPv4 & IPv6)
-    has_dns_v4 = "dpt:53" in fw_status.stdout if fw_status else False
+    has_dns_v4 = "dpt:53" in fw_status.stdout if (fw_status and fw_status.stdout) else False
     
     # Check for IPv6 if enabled
     ipv6_up = get_current_ipv6() is not None
-    has_dns_v6 = "dpt:53" in fw6_status.stdout if (fw6_status and ipv6_up) else not ipv6_up
+    # Use a more robust check for IPv6 redirect
+    has_dns_v6 = True
+    if ipv6_up:
+        if not fw6_status or not fw6_status.stdout or "dpt:53" not in fw6_status.stdout:
+            has_dns_v6 = False
     
     if not has_dns_v4 or not has_dns_v6:
         reason = []

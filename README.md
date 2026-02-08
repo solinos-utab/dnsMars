@@ -1,6 +1,13 @@
-# 🚀 DNS Mars Data Telekomunikasi
+# 🚀 PT MARS DATA TELEKOMUNIKASI - DUAL STACK DNS ENGINE
 
 Intelligent DNS Management System with Anti-DDoS, Malware Protection, and Self-Healing capabilities.
+
+---
+
+### 📖 Dokumentasi Lengkap
+Silakan baca [PANDUAN_SISTEM.md](file:///home/dns/PANDUAN_SISTEM.md) untuk instruksi operasional detail.
+
+---
 
 ## 🛠️ Quick Installation (One-Liner)
 

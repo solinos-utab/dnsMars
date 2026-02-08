@@ -190,24 +190,40 @@ traffic_data = []
 
 def get_traffic_stats():
     try:
-        # Count queries in the last 60 seconds from dnsmasq log
-        # This is a simplified version; in production, use a more efficient log parser or dnsmasq stats
-        cmd = "sudo tail -n 500 /var/log/dnsmasq.log | grep 'query' | wc -l"
-        count = subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip()
-        return int(count) if count else 0
+        # Get total queries from the last 1 second to calculate QPS accurately
+        # We'll use the current timestamp from log (e.g., "Feb  8 09:08:18")
+        now = datetime.now()
+        timestamp_sec = now.strftime('%H:%M:%S')
+        
+        # Calculate QPS: Count queries in the EXACT current second
+        cmd_qps = f"sudo grep '{timestamp_sec}' /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
+        qps_count = subprocess.run(cmd_qps, shell=True, capture_output=True, text=True).stdout.strip()
+        qps = int(qps_count) if qps_count else 0
+        
+        # Snapshot: Count queries in the last 500 lines for activity indicator
+        cmd_snapshot = "sudo tail -n 500 /var/log/dnsmasq.log | grep 'query' | wc -l"
+        snapshot_count = subprocess.run(cmd_snapshot, shell=True, capture_output=True, text=True).stdout.strip()
+        snapshot = int(snapshot_count) if snapshot_count else 0
+        
+        return qps, snapshot
     except:
-        return 0
+        return 0, 0
 
 @app.route('/api/traffic')
 def traffic():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
-    # Return last 20 data points
+    
     global traffic_data
     current_time = datetime.now().strftime('%H:%M:%S')
-    count = get_traffic_stats()
+    qps, snapshot = get_traffic_stats()
     
-    traffic_data.append({'time': current_time, 'queries': count})
+    traffic_data.append({
+        'time': current_time, 
+        'qps': qps,
+        'queries': snapshot
+    })
+    
     if len(traffic_data) > 20:
         traffic_data.pop(0)
         
@@ -220,9 +236,9 @@ def get_service_status(service_name):
     except:
         return False
 
-def run_command(command):
+def run_command(command, timeout=30):
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=5)
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
         return result.stdout if result.stdout else result.stderr
     except Exception as e:
         return str(e)
@@ -251,13 +267,18 @@ def view_manual_html():
 
 def get_iptables_status():
     try:
-        # Check for NAT redirection
-        nat_res = subprocess.run(['sudo', 'iptables', '-t', 'nat', '-L', 'PREROUTING', '-n'], capture_output=True, text=True)
+        # Check for NAT redirection in both IPv4 and IPv6
+        nat_v4 = subprocess.run(['sudo', 'iptables', '-t', 'nat', '-L', 'PREROUTING', '-n'], capture_output=True, text=True)
+        nat_v6 = subprocess.run(['sudo', 'ip6tables', '-t', 'nat', '-L', 'PREROUTING', '-n'], capture_output=True, text=True)
+        
         # Use iptables-save for more reliable module detection (hashlimit, connlimit)
         save_res = subprocess.run(['sudo', 'iptables-save'], capture_output=True, text=True)
         
+        # NAT is considered active if REDIRECT exists in either IPv4 or IPv6
+        is_nat_active = 'REDIRECT' in nat_v4.stdout or 'REDIRECT' in nat_v6.stdout
+        
         return {
-            'nat': 'REDIRECT' in nat_res.stdout,
+            'nat': is_nat_active,
             'flood_prot': 'hashlimit' in save_res.stdout,
             'conn_limit': 'connlimit' in save_res.stdout
         }
@@ -344,23 +365,20 @@ def get_network_info():
 
 def get_trust_info():
     try:
-        # Try direct read first
-        path = '/etc/dnsmasq.d/trust.conf'
+        # SSOT: Read from /etc/dnsmasq.d/smartdns.conf
+        path = '/etc/dnsmasq.d/smartdns.conf'
         if os.path.exists(path):
             with open(path, 'r') as f:
-                lines = f.readlines()
-                ips = [line.strip().replace('server=', '') for line in lines if line.strip().startswith('server=')]
-                if ips:
-                    return {'enabled': True, 'ip': ', '.join(ips)}
-        
-        # Try sudo cat if direct read fails or file not found by os.path
-        res = subprocess.run(['sudo', 'cat', path], capture_output=True, text=True)
-        if res.returncode == 0:
-            lines = res.stdout.strip().split('\n')
-            ips = [line.strip().replace('server=', '') for line in lines if line.strip().startswith('server=')]
-            if ips:
-                return {'enabled': True, 'ip': ', '.join(ips)}
+                content = f.read()
+                # Extract all server= lines
+                ips = re.findall(r'^server=([\d.]+)', content, re.MULTILINE)
                 
+                # Filter out default upstreams to determine if "Trust" (custom DNS) is actually active
+                defaults = ['8.8.8.8', '1.1.1.1']
+                trust_ips = [ip for ip in ips if ip not in defaults]
+                
+                if trust_ips:
+                    return {'enabled': True, 'ip': ', '.join(trust_ips)}
         return {'enabled': False, 'ip': ''}
     except:
         return {'enabled': False, 'ip': ''}
@@ -376,6 +394,18 @@ def status():
     net_info = get_network_info()
     trust_info = get_trust_info()
     
+    # Check DNSSEC status
+    dnssec_active = False
+    try:
+        # Check if proxy-dnssec is in dnsmasq config
+        dnsmasq_conf = "/etc/dnsmasq.d/smartdns.conf"
+        if os.path.exists(dnsmasq_conf):
+            with open(dnsmasq_conf, 'r') as f:
+                if 'proxy-dnssec' in f.read():
+                    dnssec_active = True
+    except:
+        pass
+
     # Guardian Logs
     guardian_logs = []
     if os.path.exists('/home/dns/guardian.log'):
@@ -394,9 +424,18 @@ def status():
         except:
             pass
 
+    # HDD Usage
+    hdd_usage = 0
+    try:
+        hdd = psutil.disk_usage('/')
+        hdd_usage = hdd.percent
+    except:
+        pass
+
     return jsonify({
         'dnsmasq': get_service_status('dnsmasq'),
         'unbound': get_service_status('unbound'),
+        'dnssec': dnssec_active,
         'resolved': get_service_status('systemd-resolved'),
         'guardian': get_service_status('guardian'),
         'iptables': fw_status['nat'],
@@ -409,6 +448,7 @@ def status():
         'metrics': {
             'cpu': cpu_usage,
             'ram': ram_usage,
+            'hdd': hdd_usage,
             'dns_perf': dns_perf
         },
         'network': net_info,
@@ -542,24 +582,32 @@ def action():
     elif cmd_type == 'clear_cache':
         run_command("sudo systemctl restart dnsmasq && sudo unbound-control flush_zone .")
     elif cmd_type == 'blacklist' and domain:
-        # Redirect to local landing page (Internet Positif) using server IP
-        server_ip = get_server_ip()
+        # Redirect to 0.0.0.0 which will be aliased to server IP if DNS Trust is enabled
         action_val = data.get('action', 'add')
         if action_val == 'add':
-            run_command(f"echo 'address=/{domain}/{server_ip}' | sudo tee -a /etc/dnsmasq.d/blacklist.conf && sudo systemctl restart dnsmasq")
+            run_command(f"echo 'address=/{domain}/0.0.0.0' | sudo tee -a /etc/dnsmasq.d/blacklist.conf && sudo systemctl restart dnsmasq")
         elif action_val == 'remove':
-            run_command(f"sudo sed -i '/address=\/{domain}\/{server_ip}/d' /etc/dnsmasq.d/blacklist.conf && sudo systemctl restart dnsmasq")
+            run_command(f"sudo sed -i '/address=\/{domain}\/0.0.0.0/d' /etc/dnsmasq.d/blacklist.conf && sudo systemctl restart dnsmasq")
     elif cmd_type == 'whitelist' and domain:
-        # Use server=/domain/ to whitelist and forward to a public DNS
-        run_command(f"echo 'server=/{domain}/1.1.1.1' | sudo tee -a /etc/dnsmasq.d/whitelist.conf && sudo systemctl restart dnsmasq")
+        # 1. Remove from blacklist if exists
+        blacklist_path = "/etc/dnsmasq.d/blacklist.conf"
+        if os.path.exists(blacklist_path):
+            run_command(f"sudo sed -i '/address=\/{domain}\//d' {blacklist_path}")
+        
+        # 2. Add to whitelist.conf with a stable public DNS (8.8.8.8)
+        run_command(f"echo 'server=/{domain}/8.8.8.8' | sudo tee -a /etc/dnsmasq.d/whitelist.conf")
+        
+        # 3. Restart dnsmasq to apply
+        run_command("sudo systemctl restart dnsmasq")
+        
+        return jsonify({'status': 'success', 'message': f'Domain {domain} whitelisted and removed from blacklist successfully'})
     elif cmd_type == 'update_ssh':
         run_command("sudo apt-get update && sudo apt-get install --only-upgrade openssh-server -y")
     elif cmd_type == 'update_firewall':
         run_command("sudo chmod +x /home/dns/setup_firewall.sh && sudo /home/dns/setup_firewall.sh")
     elif cmd_type == 'malware_shield':
-        # Redirect malware domains to landing page
-        server_ip = get_server_ip()
-        cmd = f"curl -s https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts | grep '^0.0.0.0' | awk '{{print \"address=/\"$2\"/{server_ip}\"}}' | sudo tee /etc/dnsmasq.d/malware.conf > /dev/null && sudo systemctl restart dnsmasq"
+        # Redirect malware domains to 0.0.0.0
+        cmd = f"curl -s https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts | grep '^0.0.0.0' | awk '{{print \"address=/\"$2\"/0.0.0.0\"}}' | sudo tee /etc/dnsmasq.d/malware.conf > /dev/null && sudo systemctl restart dnsmasq"
         run_command(cmd)
     elif cmd_type == 'change_dns' and dns_ip:
         # Support multiple IPs separated by comma or space
@@ -656,12 +704,16 @@ def action():
             run_command("sudo sed -i '/interface: ::1/d' /home/dns/unbound_smartdns.conf")
         run_command("sudo systemctl restart dnsmasq && sudo systemctl restart unbound")
     elif cmd_type == 'toggle_trust':
+        # SSOT: Always target /etc/dnsmasq.d/smartdns.conf
+        smartdns_path = '/etc/dnsmasq.d/smartdns.conf'
         if trust_enabled and trust_ip:
             # Support multiple IPs separated by comma or space
             ips = re.split(r'[,\s]+', trust_ip)
-            # Add trust servers to dnsmasq
+            # Add trust servers to dnsmasq smartdns.conf
             dnsmasq_servers = "\n".join([f"server={ip.strip()}" for ip in ips if ip.strip()])
-            run_command(f"echo '{dnsmasq_servers}' | sudo tee /etc/dnsmasq.d/trust.conf")
+            # Add proxy-dnssec as well
+            dnsmasq_servers += "\nproxy-dnssec\n"
+            run_command(f"echo '{dnsmasq_servers}' | sudo tee {smartdns_path}")
             
             # Also update Unbound to use trust servers
             forward_lines = "\n".join([f"    forward-addr: {ip.strip()}" for ip in ips if ip.strip()])
@@ -671,22 +723,31 @@ def action():
             with open('/home/dns/temp_forward.conf', 'w') as f:
                 f.write(forward_conf)
             run_command("sudo mv /home/dns/temp_forward.conf /etc/unbound/unbound.conf.d/forward.conf")
+            
             # Re-enable aliases if they were disabled
-            run_command("sudo sed -i 's/^#*alias=/alias=/' /home/dns/dnsmasq_smartdns.conf")
+            run_command("sudo sed -i 's/^#alias=/alias=/' /etc/dnsmasq.d/alias.conf")
+            run_command("sudo sed -i 's/^#filter-AAAA/filter-AAAA/' /etc/dnsmasq.d/alias.conf")
+            
+            # Apply firewall rules immediately
+            run_command("sudo bash /home/dns/setup_firewall.sh")
             run_command("sudo systemctl restart dnsmasq && sudo systemctl restart unbound")
         else:
-            # Remove trust server from dnsmasq
-            run_command("sudo rm -f /etc/dnsmasq.d/trust.conf")
-            # Revert Unbound to default (8.8.8.8) when trust is disabled
+            # Revert to default upstreams (Google/Cloudflare) in smartdns.conf
+            default_servers = "server=8.8.8.8\nserver=1.1.1.1\n"
+            run_command(f"echo '{default_servers}' | sudo tee {smartdns_path}")
+            
+            # Revert Unbound to default
             forward_conf = 'forward-zone:\n    name: "."\n    forward-addr: 8.8.8.8\n    forward-addr: 1.1.1.1\n'
             with open('/home/dns/temp_forward.conf', 'w') as f:
                 f.write(forward_conf)
             run_command("sudo mv /home/dns/temp_forward.conf /etc/unbound/unbound.conf.d/forward.conf")
-            # Clear automatic malware lists as requested: "tidak ada blokir an kecuali manual"
-            run_command("sudo truncate -s 0 /etc/dnsmasq.d/malware.conf")
-            run_command("sudo truncate -s 0 /etc/dnsmasq.d/malware_test.conf")
-            # Also disable aliases to ensure no redirection to block pages
-            run_command("sudo sed -i 's/^#*alias=/#alias=/' /home/dns/dnsmasq_smartdns.conf")
+            
+            # Disable aliases to ensure no redirection to block pages (Internet Positif inactive)
+            run_command("sudo sed -i 's/^alias=/#alias=/' /etc/dnsmasq.d/alias.conf")
+            run_command("sudo sed -i 's/^filter-AAAA/#filter-AAAA/' /etc/dnsmasq.d/alias.conf")
+            
+            # Apply firewall rules immediately
+            run_command("sudo bash /home/dns/setup_firewall.sh")
             run_command("sudo systemctl restart dnsmasq && sudo systemctl restart unbound")
         
     return jsonify({'status': 'success'})
@@ -696,8 +757,48 @@ def logs():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
     # Get last 20 lines of dnsmasq logs
-    result = run_command("sudo tail -n 20 /var/log/syslog | grep -E 'dnsmasq|unbound'")
+    result = run_command("sudo tail -n 20 /var/log/dnsmasq.log")
     return jsonify({'logs': result})
+
+@app.route('/api/banned_ips', methods=['GET'])
+def get_banned_ips():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    banned_ips = []
+    if os.path.exists('/home/dns/banned_ips.txt'):
+        try:
+            with open('/home/dns/banned_ips.txt', 'r') as f:
+                banned_ips = list(set([line.strip() for line in f if line.strip()]))
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)})
+    
+    return jsonify({'status': 'success', 'ips': banned_ips})
+
+@app.route('/api/unblock_ip', methods=['POST'])
+def unblock_ip():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    data = request.json
+    ip = data.get('ip', '').strip()
+    if not ip:
+        return jsonify({'status': 'error', 'message': 'IP address is required'}), 400
+    
+    # Sanitize IP
+    ip = re.sub(r'[^0-9.]', '', ip)
+    
+    try:
+        # Remove from iptables
+        run_command(f"sudo iptables -D INPUT -s {ip} -j DROP")
+        
+        # Remove from banned_ips.txt
+        if os.path.exists('/home/dns/banned_ips.txt'):
+            run_command(f"sudo sed -i '/^{ip}$/d' /home/dns/banned_ips.txt")
+            
+        return jsonify({'status': 'success', 'message': f'IP {ip} has been unblocked'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
 
 if __name__ == '__main__':
     # Use SSL context for HTTPS

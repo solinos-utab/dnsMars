@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DNS Mars Data Telekomunikasi</title>
+    <title>PT MARS DATA TELEKOMUNIKASI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
@@ -111,14 +111,14 @@
                 <div>
                     <h1 class="text-2xl md:text-3xl font-bold font-orbitron tracking-wider text-white">PT MARS DATA TELEKOMUNIKASI</h1>
                     <div class="flex items-center gap-4 mt-1">
-                        <p class="text-blue-400 font-medium tracking-widest text-xs">DNS MARS DATA TELEKOMUNIKASI</p>
+                        <p class="text-blue-400 font-medium tracking-widest text-xs">DUAL STACK DNS ENGINE</p>
                         <button onclick="openPasswordModal()" class="text-[9px] text-slate-500 hover:text-purple-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">CHANGE PWD</button>
                         <button onclick="logout()" class="text-[9px] text-slate-500 hover:text-red-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">LOGOUT</button>
                     </div>
                 </div>
             </div>
             
-            <div class="grid grid-cols-3 gap-4 w-full lg:w-auto">
+            <div class="grid grid-cols-4 gap-4 w-full lg:w-auto">
                 <div class="glass p-3 rounded-xl min-w-[110px]">
                     <span class="text-[10px] uppercase text-slate-400 block mb-1">CPU</span>
                     <div class="flex items-end gap-1"><span id="metric-cpu" class="text-xl font-orbitron text-white">0</span><span class="text-xs text-slate-500 mb-1">%</span></div>
@@ -128,6 +128,11 @@
                     <span class="text-[10px] uppercase text-slate-400 block mb-1">RAM</span>
                     <div class="flex items-end gap-1"><span id="metric-ram" class="text-xl font-orbitron text-white">0</span><span class="text-xs text-slate-500 mb-1">%</span></div>
                     <div class="progress-bar mt-2"><div id="bar-ram" class="progress-fill" style="width: 0%"></div></div>
+                </div>
+                <div class="glass p-3 rounded-xl min-w-[110px]">
+                    <span class="text-[10px] uppercase text-slate-400 block mb-1">HDD</span>
+                    <div class="flex items-end gap-1"><span id="metric-hdd" class="text-xl font-orbitron text-white">0</span><span class="text-xs text-slate-500 mb-1">%</span></div>
+                    <div class="progress-bar mt-2"><div id="bar-hdd" class="progress-fill" style="width: 0%"></div></div>
                 </div>
                 <div class="glass p-3 rounded-xl min-w-[110px]">
                     <span class="text-[10px] uppercase text-slate-400 block mb-1">DNS</span>
@@ -148,6 +153,7 @@
                     <div class="grid grid-cols-1 gap-3">
                         <div class="flex justify-between items-center"><span class="text-xs text-slate-400">DNSMASQ</span><span id="status-dnsmasq" class="text-xs font-orbitron">...</span></div>
                         <div class="flex justify-between items-center"><span class="text-xs text-slate-400">UNBOUND</span><span id="status-unbound" class="text-xs font-orbitron">...</span></div>
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">DNSSEC</span><span id="status-dnssec" class="text-xs font-orbitron">...</span></div>
                         <div class="flex justify-between items-center"><span class="text-xs text-slate-400">GUARDIAN</span><span id="status-guardian" class="text-xs font-orbitron">...</span></div>
                         <div class="flex justify-between items-center"><span class="text-xs text-slate-400">DDoS PROT</span><span id="status-security" class="text-xs font-orbitron">...</span></div>
                         <div class="flex justify-between items-center"><span class="text-xs text-slate-400">NAT INTCP</span><span id="status-iptables" class="text-xs font-orbitron">...</span></div>
@@ -167,6 +173,17 @@
                         <button onclick="doAction('malware_shield')" class="text-left px-4 py-3 bg-red-900/20 hover:bg-red-900/40 border border-red-500/30 rounded-xl transition group">
                             <span class="block text-[10px] text-red-400 font-orbitron">PROTECTION</span><span class="text-xs font-bold text-white">MALWARE SHIELD</span>
                         </button>
+                    </div>
+                </div>
+
+                <!-- Banned IP Management -->
+                <div class="glass p-5 rounded-2xl space-y-3">
+                    <div class="flex justify-between items-center border-b border-white/10 pb-2">
+                        <h2 class="text-sm font-orbitron text-red-400">BLOCKED IPs</h2>
+                        <button onclick="fetchBannedIps()" class="text-[9px] text-slate-500 hover:text-red-400 font-orbitron">REFRESH</button>
+                    </div>
+                    <div id="banned-ips-list" class="max-h-[200px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                        <p class="text-[10px] text-slate-500 text-center py-2">Loading banned IPs...</p>
                     </div>
                 </div>
 
@@ -415,8 +432,56 @@
         const ctx = document.getElementById('trafficChart').getContext('2d');
         const trafficChart = new Chart(ctx, {
             type: 'line',
-            data: { labels: [], datasets: [{ label: 'Queries', data: [], borderColor: '#00f2ff', backgroundColor: 'rgba(0, 242, 255, 0.05)', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.4 }] },
-            options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#64748b', font: { size: 10 } } }, x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } } }, plugins: { legend: { display: false } } }
+            data: { 
+                labels: [], 
+                datasets: [
+                    { 
+                        label: 'QPS', 
+                        data: [], 
+                        borderColor: '#ff00ff', 
+                        backgroundColor: 'rgba(255, 0, 255, 0.1)', 
+                        borderWidth: 2, 
+                        pointRadius: 0, 
+                        fill: true, 
+                        tension: 0.4 
+                    },
+                    { 
+                        label: 'Snapshot Queries', 
+                        data: [], 
+                        borderColor: '#00f2ff', 
+                        backgroundColor: 'rgba(0, 242, 255, 0.05)', 
+                        borderWidth: 1.5, 
+                        pointRadius: 0, 
+                        fill: true, 
+                        tension: 0.4 
+                    }
+                ] 
+            },
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false, 
+                scales: { 
+                    y: { 
+                        beginAtZero: true, 
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' }, 
+                        ticks: { color: '#64748b', font: { size: 10 } } 
+                    }, 
+                    x: { 
+                        grid: { display: false }, 
+                        ticks: { color: '#64748b', font: { size: 10 } } 
+                    } 
+                }, 
+                plugins: { 
+                    legend: { 
+                        display: true,
+                        labels: {
+                            color: '#64748b',
+                            font: { size: 10 },
+                            boxWidth: 10
+                        }
+                    } 
+                } 
+            }
         });
 
         let metricsInterval, trafficInterval;
@@ -446,6 +511,7 @@
                 const data = await res.json();
                 updateElementStatus('dnsmasq', data.dnsmasq);
                 updateElementStatus('unbound', data.unbound);
+                updateElementStatus('dnssec', data.dnssec);
                 updateElementStatus('guardian', data.guardian);
                 updateElementStatus('security', data.security.flood_protection && data.security.connection_limit);
                 updateElementStatus('iptables', data.iptables);
@@ -462,6 +528,7 @@
 
                 updateMetricValue('cpu', data.metrics.cpu);
                 updateMetricValue('ram', data.metrics.ram);
+                updateMetricValue('hdd', data.metrics.hdd);
                 updateMetricValue('perf', data.metrics.dns_perf);
 
                 // Pre-fill Network Form if empty
@@ -500,7 +567,8 @@
                 if (res.status === 401) return;
                 const data = await res.json();
                 trafficChart.data.labels = data.map(d => d.time);
-                trafficChart.data.datasets[0].data = data.map(d => d.queries);
+                trafficChart.data.datasets[0].data = data.map(d => d.qps);
+                trafficChart.data.datasets[1].data = data.map(d => d.queries);
                 trafficChart.update('none');
             } catch (e) { console.error(e); }
             
@@ -706,9 +774,52 @@
             try { const res = await fetch('/api/logs'); const data = await res.json(); document.getElementById('logs-content').innerText = data.logs || 'No recent logs'; } catch (e) { }
         }
 
+        async function fetchBannedIps() {
+            const listEl = document.getElementById('banned-ips-list');
+            try {
+                const res = await fetch('/api/banned_ips');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    if (data.ips.length === 0) {
+                        listEl.innerHTML = '<p class="text-[10px] text-slate-500 text-center py-2">No blocked IPs</p>';
+                    } else {
+                        listEl.innerHTML = data.ips.map(ip => `
+                            <div class="flex justify-between items-center bg-white/5 border border-white/5 rounded-lg px-3 py-2 hover:bg-white/10 transition">
+                                <span class="text-[10px] text-slate-300 font-mono">${ip}</span>
+                                <button onclick="unblockIp('${ip}')" class="text-slate-500 hover:text-green-400 transition" title="Unblock IP">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                    </svg>
+                                </button>
+                            </div>
+                        `).join('');
+                    }
+                }
+            } catch (e) { console.error('Failed to fetch banned IPs', e); }
+        }
+
+        async function unblockIp(ip) {
+            if (!confirm('Unblock IP ' + ip + '?')) return;
+            try {
+                const res = await fetch('/api/unblock_ip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert('IP ' + ip + ' unblocked successfully');
+                    fetchBannedIps();
+                } else {
+                    alert('Failed to unblock: ' + data.message);
+                }
+            } catch (e) { alert('Connection error'); }
+        }
+
         // Initialize
         updateMetrics();
-        // Intervals are now managed within updateMetrics and attemptLogin
+        fetchBannedIps();
+        setInterval(fetchBannedIps, 10000);
     </script>
 </body>
 </html>

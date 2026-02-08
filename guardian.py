@@ -7,8 +7,8 @@ from datetime import datetime
 # --- CONFIGURATION ---
 LOG_FILE = "/var/log/syslog"
 DNSMASQ_LOG = "/var/log/dnsmasq.log"
-BAN_THRESHOLD = 1800  # Increased to match 1500 QPS (Checking 2000 log lines)
-MALICIOUS_THRESHOLD = 50 # Increased slightly
+BAN_THRESHOLD = 10000  # Set very high for ISP environment (Mikrotik support)
+MALICIOUS_THRESHOLD = 200 # Increased to avoid false positives
 WHITELIST_FILE = "/home/dns/whitelist.conf"
 GUARDIAN_LOG = "/home/dns/guardian.log"
 BANNED_IPS_FILE = "/home/dns/banned_ips.txt"
@@ -31,7 +31,46 @@ def load_whitelist():
             print(f"Error loading whitelist: {e}")
     return wl, subnets
 
+# Global variables
 WHITELIST, WHITELIST_SUBNETS = load_whitelist()
+LAST_WL_RELOAD = time.time()
+
+def reload_whitelist_if_needed():
+    global WHITELIST, WHITELIST_SUBNETS, LAST_WL_RELOAD
+    # Reload every 60 seconds
+    if time.time() - LAST_WL_RELOAD > 60:
+        WHITELIST, WHITELIST_SUBNETS = load_whitelist()
+        LAST_WL_RELOAD = time.time()
+        # Clean up banned_ips.txt if needed
+        clean_banned_ips()
+
+def clean_banned_ips():
+    if not os.path.exists(BANNED_IPS_FILE):
+        return
+    
+    try:
+        with open(BANNED_IPS_FILE, 'r') as f:
+            ips = [line.strip() for line in f if line.strip()]
+        
+        valid_ips = []
+        changed = False
+        for ip in ips:
+            if is_whitelisted(ip):
+                log_event(f"Removing whitelisted IP from banned list: {ip}")
+                # Remove from iptables too
+                run_cmd(f"sudo iptables -D INPUT -s {ip} -j DROP")
+                changed = True
+            else:
+                valid_ips.append(ip)
+        
+        if changed:
+            # Write back unique valid IPs
+            unique_ips = list(set(valid_ips))
+            with open(BANNED_IPS_FILE, 'w') as f:
+                for ip in unique_ips:
+                    f.write(f"{ip}\n")
+    except Exception as e:
+        log_event(f"Error cleaning banned IPs: {e}")
 
 def is_whitelisted(ip):
     if ip in WHITELIST:
@@ -65,20 +104,33 @@ def get_current_ip():
         res = run_cmd(cmd)
         if res and res.stdout.strip():
             return res.stdout.strip()
-            
-        # Specific check for ens18 as a last resort
-        cmd = "ip -4 addr show ens18 2>/dev/null | grep inet | awk '{print $2}' | cut -d/ -f1"
+    except:
+        pass
+    return "127.0.0.1"
+
+def get_current_ipv6():
+    try:
+        # Get first global IPv6
+        cmd = "ip -6 addr show | grep -v 'fe80' | grep -v '::1' | grep 'inet6' | awk '{print $2}' | cut -d/ -f1 | head -n1"
         res = run_cmd(cmd)
         if res and res.stdout.strip():
             return res.stdout.strip()
     except:
         pass
-    return "127.0.0.1"
+    return None
 
-# Auto-update whitelist with current server IP
-server_ip = get_current_ip()
-if server_ip not in WHITELIST:
-    WHITELIST.append(server_ip)
+# Global variables
+WHITELIST, WHITELIST_SUBNETS = load_whitelist()
+LAST_WL_RELOAD = time.time()
+LAST_IP_V4 = get_current_ip()
+LAST_IP_V6 = get_current_ipv6()
+server_ip = LAST_IP_V4
+
+# Auto-update whitelist with current server IPs
+if LAST_IP_V4 not in WHITELIST:
+    WHITELIST.append(LAST_IP_V4)
+if LAST_IP_V6 and LAST_IP_V6 not in WHITELIST:
+    WHITELIST.append(LAST_IP_V6)
 
 def log_event(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -94,11 +146,25 @@ def run_cmd(cmd):
         return None
 
 def block_ip(ip):
+    # Always reload/check before blocking to be sure
+    global WHITELIST, WHITELIST_SUBNETS
+    WHITELIST, WHITELIST_SUBNETS = load_whitelist()
+    
     if is_whitelisted(ip):
+        log_event(f"SKIP BLOCKING whitelisted IP: {ip}")
         return
+    
+    # Check if already blocked to avoid duplicates
+    if os.path.exists(BANNED_IPS_FILE):
+        with open(BANNED_IPS_FILE, 'r') as f:
+            if ip in f.read():
+                return
+
     log_event(f"BLOCKING IP {ip}...")
     run_cmd(f"sudo iptables -I INPUT -s {ip} -j DROP")
-    run_cmd(f"echo '{ip}' >> {BANNED_IPS_FILE}")
+    # Append to file
+    with open(BANNED_IPS_FILE, 'a') as f:
+        f.write(f"{ip}\n")
 
 # --- LOG ANALYSIS ---
 def analyze_logs():
@@ -131,35 +197,158 @@ def analyze_logs():
             block_ip(ip)
 
 # --- SELF-HEALING LOGIC ---
-def check_and_repair_services():
-    services = ["dnsmasq", "unbound"]
-    for service in services:
-        status = run_cmd(f"systemctl is-active {service}")
-        if status and status.stdout.strip() != "active":
-            log_event(f"ALERT: {service} is DOWN. Attempting self-healing...")
+TRUST_CONF = "/etc/dnsmasq.d/smartdns.conf"
+MAX_LOG_SIZE = 5 * 1024 * 1024  # 5MB
+
+def rotate_logs():
+    if os.path.exists(GUARDIAN_LOG) and os.path.getsize(GUARDIAN_LOG) > MAX_LOG_SIZE:
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        os.rename(GUARDIAN_LOG, f"{GUARDIAN_LOG}.{timestamp}")
+        log_event("Guardian log rotated.")
+
+def is_port_listening(port, proto="tcp"):
+    # Use ss to check if port is listening
+    cmd = f"ss -lntu | grep ':{port} ' | grep -i '{proto}'"
+    res = run_cmd(cmd)
+    return res and res.stdout.strip() != ""
+
+def is_dns_trust_enabled():
+    if not os.path.exists(TRUST_CONF):
+        return False
+    try:
+        with open(TRUST_CONF, 'r') as f:
+            for line in f:
+                if line.strip().startswith('server='):
+                    return True
+    except:
+        pass
+    return False
+
+def sync_blocking_config(dns_trust):
+    blocking_files = [
+        "/etc/dnsmasq.d/alias.conf",
+        "/etc/dnsmasq.d/blacklist.conf",
+        "/etc/dnsmasq.d/malware.conf",
+        "/etc/dnsmasq.d/malware_test.conf"
+    ]
+    
+    changed = False
+    for file_path in blocking_files:
+        if not os.path.exists(file_path):
+            continue
             
-            # Check for config errors before restarting
-            check_conf = ""
+        try:
+            with open(file_path, 'r') as f:
+                lines = f.readlines()
+            
+            new_lines = []
+            file_changed = False
+            for line in lines:
+                clean_line = line.strip()
+                # Skip comments that are headers or empty lines
+                if not clean_line or (clean_line.startswith('#') and not clean_line[1:].strip().startswith(('address=', 'alias=', 'filter-AAAA'))):
+                    new_lines.append(line)
+                    continue
+                
+                # ALWAYS keep these rules active regardless of dns_trust status
+                # because the user expects the block page and local blacklist to work
+                if clean_line.startswith('#'):
+                    rule_content = clean_line[1:].strip()
+                    if rule_content.startswith(('address=', 'alias=', 'filter-AAAA')):
+                        new_lines.append(line.lstrip('#').lstrip())
+                        file_changed = True
+                    else:
+                        new_lines.append(line)
+                else:
+                    new_lines.append(line)
+            
+            if file_changed:
+                with open(file_path, 'w') as f:
+                    f.writelines(new_lines)
+                log_event(f"Config {file_path} synchronized with DNS Trust status ({'ENABLED' if dns_trust else 'DISABLED'})")
+                changed = True
+        except Exception as e:
+            log_event(f"Error syncing {file_path}: {e}")
+            
+    if changed:
+        log_event("Restarting dnsmasq to apply DNS Trust sync changes...")
+        run_cmd("sudo systemctl restart dnsmasq")
+
+def check_and_repair_services():
+    rotate_logs()
+    dns_trust = is_dns_trust_enabled()
+    
+    # Define services with their critical ports
+    service_map = {
+        "dnsmasq": {"port": 53, "proto": "udp"},
+        "unbound": {"port": 5353, "proto": "udp"},
+        "dnsmars-gui": {"port": 5000, "proto": "tcp"}
+    }
+
+    for service, info in service_map.items():
+        status = run_cmd(f"systemctl is-active {service}")
+        port_up = is_port_listening(info["port"], info["proto"])
+        
+        # If service is down or port is not listening (hung)
+        if (status and status.stdout.strip() != "active") or not port_up:
+            reason = "is DOWN" if status.stdout.strip() != "active" else f"is HUNG (port {info['port']} not responding)"
+            log_event(f"ALERT: {service} {reason}. Attempting self-healing...")
+            
+            # Special check for dnsmasq/unbound config
+            check_conf = None
             if service == "dnsmasq":
                 check_conf = run_cmd("dnsmasq --test")
             elif service == "unbound":
                 check_conf = run_cmd("unbound-checkconf")
             
-            if check_conf and "error" in check_conf.stderr.lower():
+            if check_conf and check_conf.stderr and "error" in check_conf.stderr.lower():
                 log_event(f"ERROR: {service} config is corrupted: {check_conf.stderr.strip()}")
-                # Optional: Restore from backup if we had one
+                # Try to restore default or notify, but for now we try restart anyway
             
             run_cmd(f"systemctl restart {service}")
-            time.sleep(2)
+            time.sleep(3) # Give it time to bind ports
             
             new_status = run_cmd(f"systemctl is-active {service}")
-            if new_status and new_status.stdout.strip() == "active":
+            new_port_up = is_port_listening(info["port"], info["proto"])
+            
+            if new_status and new_status.stdout.strip() == "active" and new_port_up:
                 log_event(f"SUCCESS: {service} has been repaired and is now ONLINE.")
             else:
-                log_event(f"CRITICAL: {service} repair FAILED. Manual intervention required.")
+                log_event(f"CRITICAL: {service} repair FAILED (Status: {new_status.stdout.strip()}, Port: {new_port_up}).")
 
-# --- ATTACK DETECTION LOGIC ---
+    # --- FIREWALL SELF-HEALING (DDoS PRO & NAT INTCP) ---
+    # Enhanced firewall check: look for specific redirect rules (IPv4 & IPv6)
+    if dns_trust:
+        fw_status = run_cmd("sudo iptables -L -n -t nat | grep REDIRECT")
+        fw6_status = run_cmd("sudo ip6tables -L -n -t nat | grep REDIRECT 2>/dev/null")
+        
+        # Check for DNS redirect and HTTP/HTTPS redirect (IPv4)
+        has_dns_v4 = "dpt:53" in fw_status.stdout if fw_status else False
+        has_http_v4 = "dpt:80" in fw_status.stdout if fw_status else False
+        
+        # Check for IPv6 if enabled
+        ipv6_up = get_current_ipv6() is not None
+        has_dns_v6 = "dpt:53" in fw6_status.stdout if (fw6_status and ipv6_up) else not ipv6_up
+        
+        if not has_dns_v4 or not has_http_v4 or not has_dns_v6:
+            reason = []
+            if not has_dns_v4: reason.append("IPv4 DNS")
+            if not has_http_v4: reason.append("IPv4 HTTP")
+            if not has_dns_v6: reason.append("IPv6 DNS")
+            
+            log_event(f"ALERT: DNS Trust is ENABLED but critical firewall rules ({', '.join(reason)}) are missing. Restoring...")
+            run_cmd("sudo bash /home/dns/setup_firewall.sh")
+    else:
+        # If DNS Trust is disabled, ensure no REDIRECT rules exist
+        fw_status = run_cmd("sudo iptables -L -n -t nat | grep REDIRECT")
+        if fw_status and "53" in fw_status.stdout:
+            log_event("ALERT: DNS Trust is DISABLED but firewall rules are still active. Cleaning up...")
+            run_cmd("sudo bash /home/dns/setup_firewall.sh")
+
 def detect_and_block_attacks():
+    if not is_dns_trust_enabled():
+        return
+    
     if not os.path.exists(DNSMASQ_LOG):
         return
 
@@ -193,29 +382,41 @@ def detect_and_block_attacks():
     for ip, count in ip_counts.items():
         # Only block if it really exceeds a high threshold (e.g., 200 queries in 2000 lines ~ 1 minute)
         if count > BAN_THRESHOLD:
-            log_event(f"ATTACK DETECTED: IP {ip} sent {count} queries. Checking if it should be blocked...")
-            
-            # Additional check: If it's whitelisted, don't block
-            if is_whitelisted(ip):
-                log_event(f"SKIP BLOCK: IP {ip} is whitelisted.")
-                continue
-
-            log_event(f"BLOCKING IP {ip}...")
-            run_cmd(f"sudo iptables -I INPUT -s {ip} -j DROP")
-            run_cmd(f"echo '{ip}' >> {BANNED_IPS_FILE}")
+            log_event(f"ATTACK DETECTED: IP {ip} sent {count} queries.")
+            block_ip(ip)
 
 # --- MAIN LOOP ---
 if __name__ == "__main__":
     log_event("INTELLIGENT GUARDIAN STARTED: Monitoring system health and security...")
+    
+    # Wait for other services to settle on boot
+    time.sleep(5)
+    
     while True:
         try:
             # Refresh server IP and Whitelist in case of network changes
-            current_ip = get_current_ip()
-            if current_ip and current_ip not in WHITELIST:
-                WHITELIST.append(current_ip)
-                log_event(f"WHITELIST UPDATED: Added new server IP {current_ip}")
+            reload_whitelist_if_needed()
+            
+            # Detect IP Changes
+            current_ip_v4 = get_current_ip()
+            current_ip_v6 = get_current_ipv6()
+            
+            if current_ip_v4 != LAST_IP_V4 or current_ip_v6 != LAST_IP_V6:
+                log_event(f"NETWORK CHANGE DETECTED: v4({LAST_IP_V4}->{current_ip_v4}), v6({LAST_IP_V6}->{current_ip_v6})")
+                # Add new IPs to whitelist immediately
+                if current_ip_v4 not in WHITELIST: WHITELIST.append(current_ip_v4)
+                if current_ip_v6 and current_ip_v6 not in WHITELIST: WHITELIST.append(current_ip_v6)
+                
+                # Re-apply firewall to update rules with new IP
+                log_event("Re-applying firewall rules for new IP...")
+                run_cmd("sudo bash /home/dns/setup_firewall.sh")
+                
+                LAST_IP_V4 = current_ip_v4
+                LAST_IP_V6 = current_ip_v6
+                server_ip = current_ip_v4
 
             check_and_repair_services()
+            sync_blocking_config(is_dns_trust_enabled())
             detect_and_block_attacks()
             time.sleep(10) # Run every 10 seconds
         except KeyboardInterrupt:

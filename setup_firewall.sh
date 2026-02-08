@@ -10,37 +10,79 @@ echo "Setting up Anti-DDoS and DNS Flood Protection..."
 if [ ! -z "$1" ]; then
     SERVER_IP=$1
 else
-    # Improved IP detection
+    # Improved IP detection (IPv4)
     SERVER_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || ip -4 addr show | grep inet | grep -v '127.0.0.1' | head -n1 | awk '{print $2}' | cut -d/ -f1)
 fi
 
-echo "Using Server IP: $SERVER_IP"
+# Detect IPv6
+SERVER_IPV6=$(ip -6 addr show | grep -v "fe80" | grep -v "::1" | grep "inet6" | awk '{print $2}' | cut -d/ -f1 | head -n1)
+
+echo "Using Server IP (v4): $SERVER_IP"
+[ ! -z "$SERVER_IPV6" ] && echo "Using Server IP (v6): $SERVER_IPV6"
 
 # Load Whitelist from file
 WHITELIST_FILE="/home/dns/whitelist.conf"
 ALLOWED_IPS=("$SERVER_IP" "127.0.0.1")
-  ALLOWED_SUBNETS=()
-  
-  if [ -f "$WHITELIST_FILE" ]; then
-      while IFS= read -r line || [ -n "$line" ]; do
-          # Skip comments and empty lines
-          [[ "$line" =~ ^#.*$ ]] && continue
-          [[ -z "$line" ]] && continue
-          
-          if [[ "$line" == */* ]]; then
-              ALLOWED_SUBNETS+=("$line")
-          else
-              ALLOWED_IPS+=("$line")
-          fi
-      done < "$WHITELIST_FILE"
-  fi
+ALLOWED_IPS_V6=("$SERVER_IPV6" "::1")
+ALLOWED_SUBNETS=()
+ALLOWED_SUBNETS_V6=()
 
-  # Flush existing INPUT rules to apply ACL cleanly
- iptables -F INPUT
+if [ -f "$WHITELIST_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^#.*$ ]] && continue
+        [[ -z "$line" ]] && continue
+        
+        if [[ "$line" == *:* ]]; then
+            # IPv6
+            if [[ "$line" == */* ]]; then
+                ALLOWED_SUBNETS_V6+=("$line")
+            else
+                ALLOWED_IPS_V6+=("$line")
+            fi
+        else
+            # IPv4
+            if [[ "$line" == */* ]]; then
+                ALLOWED_SUBNETS+=("$line")
+            else
+                ALLOWED_IPS+=("$line")
+            fi
+        fi
+    done < "$WHITELIST_FILE"
+fi
 
- # Allow loopback
- iptables -A INPUT -i lo -j ACCEPT
- iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+# Flush existing INPUT rules to apply ACL cleanly
+iptables -F INPUT
+ip6tables -F INPUT 2>/dev/null || true
+
+# Allow loopback
+iptables -A INPUT -i lo -j ACCEPT
+ip6tables -A INPUT -i lo -j ACCEPT 2>/dev/null || true
+iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+
+# --- GLOBAL WHITELIST (PRIORITAS TERTINGGI) ---
+# IPv4
+echo "Applying Global Whitelist (IPv4)..."
+for ip in "${ALLOWED_IPS[@]}"; do
+    if [ ! -z "$ip" ]; then
+        iptables -A INPUT -s "$ip" -j ACCEPT
+    fi
+done
+for subnet in "${ALLOWED_SUBNETS[@]}"; do
+    iptables -A INPUT -s "$subnet" -j ACCEPT
+done
+
+# IPv6
+echo "Applying Global Whitelist (IPv6)..."
+for ip in "${ALLOWED_IPS_V6[@]}"; do
+    if [ ! -z "$ip" ] && [ "$ip" != "::1" ]; then
+        ip6tables -A INPUT -s "$ip" -j ACCEPT 2>/dev/null || true
+    fi
+done
+for subnet in "${ALLOWED_SUBNETS_V6[@]}"; do
+    ip6tables -A INPUT -s "$subnet" -j ACCEPT 2>/dev/null || true
+done
 
 # Allow SSH and Web GUI (Port 5000) for trusted IPs
 for ip in "${ALLOWED_IPS[@]}"; do
@@ -49,40 +91,68 @@ for ip in "${ALLOWED_IPS[@]}"; do
         iptables -A INPUT -s "$ip" -p tcp --dport 5000 -j ACCEPT
     fi
 done
-
-# Allow SSH and Web GUI for trusted Subnets
-for subnet in "${ALLOWED_SUBNETS[@]}"; do
-    iptables -A INPUT -s "$subnet" -p tcp --dport 22 -j ACCEPT
-    iptables -A INPUT -s "$subnet" -p tcp --dport 5000 -j ACCEPT
+# IPv6 SSH/GUI
+for ip in "${ALLOWED_IPS_V6[@]}"; do
+    if [ ! -z "$ip" ]; then
+        ip6tables -A INPUT -s "$ip" -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
+        ip6tables -A INPUT -s "$ip" -p tcp --dport 5000 -j ACCEPT 2>/dev/null || true
+    fi
 done
 
-# Allow Web GUI (Port 5000) for everyone with Rate Limiting (Proteksi Brute Force)
-# Ini memungkinkan user mengakses dari mana saja selama tidak melakukan spamming
+# Allow Web GUI (Port 5000) for everyone with Rate Limiting
 iptables -A INPUT -p tcp --dport 5000 -m state --state NEW -m recent --set
 iptables -A INPUT -p tcp --dport 5000 -m state --state NEW -m recent --update --seconds 60 --hitcount 15 -j DROP
 iptables -A INPUT -p tcp --dport 5000 -j ACCEPT
 
-# Drop all other SSH attempts (Port 5000 sudah di-allow di atas)
+ip6tables -A INPUT -p tcp --dport 5000 -j ACCEPT 2>/dev/null || true
+
+# Drop all other SSH attempts
 iptables -A INPUT -p tcp --dport 22 -j DROP
+ip6tables -A INPUT -p tcp --dport 22 -j DROP 2>/dev/null || true
 
 # Allow HTTP and HTTPS for Block Page (Accessible to all)
 iptables -A INPUT -p tcp --dport 80 -j ACCEPT
 iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+ip6tables -A INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+ip6tables -A INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
 
 # 2. Proteksi DNS UDP Flood (High Performance: 1.000.000 QPS Global, 1.500 QPS per IP)
-  # Whitelist subnet dari rate limit
+  # Whitelist IPs and subnets from rate limit
+  for ip in "${ALLOWED_IPS[@]}"; do
+      if [ ! -z "$ip" ]; then
+          iptables -A INPUT -s "$ip" -p udp --dport 53 -j ACCEPT
+          iptables -A INPUT -s "$ip" -p tcp --dport 53 -j ACCEPT
+      fi
+  done
   for subnet in "${ALLOWED_SUBNETS[@]}"; do
       iptables -A INPUT -s "$subnet" -p udp --dport 53 -j ACCEPT
+      iptables -A INPUT -s "$subnet" -p tcp --dport 53 -j ACCEPT
   done
 
-  # Per-IP Limit: 1.500 QPS (Burst 2.000)
-   # Per-IP Limit: 1.500 QPS (Burst 2.000)
-    iptables -A INPUT -p udp --dport 53 -m hashlimit --hashlimit-name dns_per_ip --hashlimit-upto 1500/sec --hashlimit-burst 2000 --hashlimit-mode srcip --hashlimit-htable-expire 30000 -j ACCEPT
+  # IPv6 Whitelist for DNS
+  for ip in "${ALLOWED_IPS_V6[@]}"; do
+      if [ ! -z "$ip" ]; then
+          ip6tables -A INPUT -s "$ip" -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+          ip6tables -A INPUT -s "$ip" -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+      fi
+  done
+  for subnet in "${ALLOWED_SUBNETS_V6[@]}"; do
+      ip6tables -A INPUT -s "$subnet" -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+      ip6tables -A INPUT -s "$subnet" -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+  done
+
+  # DNS Flood Protection (UDP Port 53) - Ditingkatkan untuk trafik besar
+  # Per-IP Limit: 5.000 QPS (Burst 2.000)
+    iptables -A INPUT -p udp --dport 53 -m hashlimit --hashlimit-name dns_flood --hashlimit-upto 5000/sec --hashlimit-burst 2000 --hashlimit-mode srcip --hashlimit-htable-expire 120000 -j ACCEPT
     
     # Global Limit: Sangat Tinggi (100.000 QPS total sebagai pengaman hardware)
     iptables -A INPUT -p udp --dport 53 -m hashlimit --hashlimit-name dns_global --hashlimit-upto 100000/sec --hashlimit-burst 120000 --hashlimit-htable-expire 30000 -j ACCEPT
 
-   # Drop sisanya
+   # IPv6 DNS Allow (Sederhana untuk sekarang, bisa ditambah hashlimit jika perlu)
+   ip6tables -A INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+   ip6tables -A INPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+
+   # Drop sisanya (IPv4)
    iptables -A INPUT -p udp --dport 53 -j DROP
 
 # 3. Proteksi DNS TCP Flood (Conn Limit: 10 connections per source IP)
@@ -93,20 +163,82 @@ iptables -A INPUT -p tcp --dport 53 -j ACCEPT
 iptables -A INPUT -p icmp --icmp-type echo-request -m limit --limit 1/s --limit-burst 5 -j ACCEPT
 iptables -A INPUT -p icmp -j DROP
 
-# 5. NAT Interception (Menangkap paksa trafik DNS luar ke server lokal)
+# --- DNS TRUST CHECK ---
+# Cek apakah ada konfigurasi upstream di smartdns.conf
+SMARTDNS_CONF="/etc/dnsmasq.d/smartdns.conf"
+if [ -f "$SMARTDNS_CONF" ] && grep -q "^server=" "$SMARTDNS_CONF"; then
+    DNS_TRUST_ENABLED=true
+    echo "DNS Trust is ENABLED. Applying block rules."
+else
+    DNS_TRUST_ENABLED=false
+    echo "DNS Trust is DISABLED. Skipping block rules."
+fi
+
+# 5. NAT Interception (Agresif: Menangkap semua trafik DNS dan HTTP luar ke server lokal)
 iptables -t nat -F PREROUTING
+ip6tables -t nat -F PREROUTING 2>/dev/null || true
+
+# Selalu aktifkan NAT Interception agar Halaman Blokir dan Intersepsi DNS tetap jalan
+# meskipun DNS Trust (upstream) sedang dimatikan.
+echo "Applying NAT Interception (DNS & HTTP/HTTPS) for Block Page..."
+
+# Redirect trafik UDP port 53 (DNS)
+for ip in "${ALLOWED_IPS[@]}"; do
+    [ ! -z "$ip" ] && iptables -t nat -A PREROUTING -p udp -s "$ip" --dport 53 -j ACCEPT
+done
 iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53
+
+# Redirect trafik TCP port 53 (DNS)
+for ip in "${ALLOWED_IPS[@]}"; do
+    [ ! -z "$ip" ] && iptables -t nat -A PREROUTING -p tcp -s "$ip" --dport 53 -j ACCEPT
+done
 iptables -t nat -A PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 53
 
+# --- HTTP/HTTPS INTERCEPTION UNTUK HALAMAN BLOKIR ---
+# Redirect trafik HTTP (port 80) dan HTTPS (port 443)
+for ip in "${ALLOWED_IPS[@]}"; do
+    [ ! -z "$ip" ] && iptables -t nat -A PREROUTING -p tcp -s "$ip" -m multiport --dports 80,443 -j ACCEPT
+done
+
+# --- Bypassing Whitelisted Domains from Interception ---
+DNSMASQ_WHITELIST="/etc/dnsmasq.d/whitelist.conf"
+if [ -f "$DNSMASQ_WHITELIST" ]; then
+    echo "Adding destination bypass for whitelisted domains..."
+    # Extract domains from server=/domain/ip format
+    DOMAINS=$(grep -oP 'server=/\K[^/]+' "$DNSMASQ_WHITELIST")
+    for domain in $DOMAINS; do
+        echo "Resolving and bypassing $domain..."
+        # Resolve domain to IPs (IPv4)
+        IPS=$(dig +short "$domain" A | grep -E '^[0-9.]+$')
+        for ip in $IPS; do
+            if [ ! -z "$ip" ]; then
+                echo "  -> Bypassing IP: $ip"
+                iptables -t nat -A PREROUTING -p tcp -d "$ip" -m multiport --dports 80,443 -j ACCEPT
+            fi
+        done
+    done
+fi
+
+iptables -t nat -A PREROUTING -p tcp --dport 80 ! -d $SERVER_IP -j REDIRECT --to-ports 80
+iptables -t nat -A PREROUTING -p tcp --dport 443 ! -d $SERVER_IP -j REDIRECT --to-ports 443
+
+# IPv6 HTTP/HTTPS Redirect
+if [ ! -z "$SERVER_IPV6" ]; then
+    ip6tables -t nat -A PREROUTING -p tcp --dport 80 ! -d $SERVER_IPV6 -j REDIRECT --to-ports 80 2>/dev/null || true
+    ip6tables -t nat -A PREROUTING -p tcp --dport 443 ! -d $SERVER_IPV6 -j REDIRECT --to-ports 443 2>/dev/null || true
+fi
+
 # 6. Restore Persistent Blocks from Guardian
-BANNED_IPS_FILE="/home/dns/banned_ips.txt"
-if [ -f "$BANNED_IPS_FILE" ]; then
-    echo "Restoring persistent blocks from $BANNED_IPS_FILE..."
-    while IFS= read -r ip || [ -n "$ip" ]; do
-        if [ ! -z "$ip" ]; then
-            iptables -I INPUT -s "$ip" -j DROP
-        fi
-    done < "$BANNED_IPS_FILE"
+if [ "$DNS_TRUST_ENABLED" = true ]; then
+    BANNED_IPS_FILE="/home/dns/banned_ips.txt"
+    if [ -f "$BANNED_IPS_FILE" ]; then
+        echo "Restoring persistent blocks from $BANNED_IPS_FILE..."
+        while IFS= read -r ip || [ -n "$ip" ]; do
+            if [ ! -z "$ip" ]; then
+                iptables -I INPUT -s "$ip" -j DROP
+            fi
+        done < "$BANNED_IPS_FILE"
+    fi
 fi
 
 # 6. Drop Invalid Packets

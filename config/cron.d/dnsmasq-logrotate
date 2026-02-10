@@ -1,0 +1,1 @@
+*/30 * * * * root /usr/sbin/logrotate /etc/logrotate.d/dnsmasq >/dev/null 2>&1

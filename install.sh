@@ -53,9 +53,10 @@ if ! grep -q "conf-dir=/etc/dnsmasq.d" /etc/dnsmasq.conf; then
 fi
 
 # Disable log-queries by default to save disk space
-if [ -f /etc/dnsmasq.d/logging.conf ]; then
-    sed -i 's/^log-queries/#log-queries/' /etc/dnsmasq.d/logging.conf
-fi
+# (Re-enabled via logging.conf if copied, but ensuring base safety)
+# if [ -f /etc/dnsmasq.d/logging.conf ]; then
+#    sed -i 's/^log-queries/#log-queries/' /etc/dnsmasq.d/logging.conf
+# fi
 
 # 4. Configure Unbound
 echo ">>> [4/7] Configuring Unbound..."
@@ -76,8 +77,20 @@ if [ -f "config/nginx/sites-available/default" ]; then
     nginx -t || echo "Warning: Nginx config check failed."
 fi
 
-# 6. Install Guardian Service
-echo ">>> [6/7] Installing Guardian Service..."
+# 6. Configure Log Rotation (Crucial for high traffic)
+echo ">>> [6/7] Configuring Log Rotation..."
+if [ -f "config/logrotate/dnsmasq" ]; then
+    cp config/logrotate/dnsmasq /etc/logrotate.d/dnsmasq
+    chmod 644 /etc/logrotate.d/dnsmasq
+fi
+
+if [ -f "config/cron.d/dnsmasq-logrotate" ]; then
+    cp config/cron.d/dnsmasq-logrotate /etc/cron.d/dnsmasq-logrotate
+    chmod 644 /etc/cron.d/dnsmasq-logrotate
+fi
+
+# 7. Install Guardian Service
+echo ">>> [7/7] Installing Guardian Service..."
 SERVICE_FILE="/etc/systemd/system/guardian.service"
 
 if [ -f "config/systemd/guardian.service" ]; then
@@ -98,8 +111,8 @@ fi
 systemctl daemon-reload
 systemctl enable dnsmasq unbound guardian nginx
 
-# 7. Start Services
-echo ">>> [7/7] Starting Services..."
+# 8. Start Services
+echo ">>> [8/8] Starting Services..."
 systemctl restart dnsmasq unbound guardian nginx
 
 echo "=== Installation Complete! ==="

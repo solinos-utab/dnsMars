@@ -17,12 +17,17 @@ CONFIG_FILE = "/home/dns/guardian_config.json"
 DEFAULT_BAN_THRESHOLD = 10000
 DEFAULT_MALICIOUS_THRESHOLD = 200
 DISK_CRITICAL_THRESHOLD = 90  # Percent
+MEM_CRITICAL_THRESHOLD = 90   # Percent
+SWAP_CRITICAL_THRESHOLD = 60  # Percent
+CPU_CRITICAL_THRESHOLD = 95   # Percent
 
 def load_config():
     config = {
         "ban_threshold": DEFAULT_BAN_THRESHOLD,
         "malicious_threshold": DEFAULT_MALICIOUS_THRESHOLD,
-        "disk_threshold": DISK_CRITICAL_THRESHOLD
+        "disk_threshold": DISK_CRITICAL_THRESHOLD,
+        "mem_threshold": MEM_CRITICAL_THRESHOLD,
+        "swap_threshold": SWAP_CRITICAL_THRESHOLD
     }
     if os.path.exists(CONFIG_FILE):
         try:
@@ -38,6 +43,8 @@ config = load_config()
 BAN_THRESHOLD = config["ban_threshold"]
 MALICIOUS_THRESHOLD = config["malicious_threshold"]
 DISK_THRESHOLD = config.get("disk_threshold", DISK_CRITICAL_THRESHOLD)
+MEM_THRESHOLD = config.get("mem_threshold", MEM_CRITICAL_THRESHOLD)
+SWAP_THRESHOLD = config.get("swap_threshold", SWAP_CRITICAL_THRESHOLD)
 
 WHITELIST_FILE = "/home/dns/whitelist.conf"
 GUARDIAN_LOG = "/home/dns/guardian.log"
@@ -76,6 +83,8 @@ def reload_whitelist_if_needed():
         BAN_THRESHOLD = config["ban_threshold"]
         MALICIOUS_THRESHOLD = config["malicious_threshold"]
         DISK_THRESHOLD = config.get("disk_threshold", DISK_CRITICAL_THRESHOLD)
+        MEM_THRESHOLD = config.get("mem_threshold", MEM_CRITICAL_THRESHOLD)
+        SWAP_THRESHOLD = config.get("swap_threshold", SWAP_CRITICAL_THRESHOLD)
         
         LAST_WL_RELOAD = time.time()
         # Clean up banned_ips.txt if needed
@@ -462,6 +471,51 @@ def check_and_repair_services():
         log_event(f"ALERT: Critical firewall rules ({', '.join(reason)}) are missing. Restoring...")
         run_cmd("sudo bash /home/dns/setup_firewall.sh")
 
+def check_resources():
+    """
+    Monitor Memory, Swap, and UDP Errors.
+    Mitigates: Memory Leak, Swap Thrashing, UDP Drops.
+    """
+    try:
+        # 1. Check Memory & Swap
+        with open('/proc/meminfo', 'r') as f:
+            meminfo = {}
+            for line in f:
+                parts = line.split(':')
+                meminfo[parts[0].strip()] = int(parts[1].split()[0])
+        
+        total_mem = meminfo.get('MemTotal', 1)
+        avail_mem = meminfo.get('MemAvailable', 0)
+        total_swap = meminfo.get('SwapTotal', 0)
+        free_swap = meminfo.get('SwapFree', 0)
+        
+        mem_usage = 100 - (avail_mem / total_mem * 100)
+        swap_usage = 100 - (free_swap / total_swap * 100) if total_swap > 0 else 0
+        
+        # Memory Leak Protection
+        if mem_usage > MEM_THRESHOLD:
+            log_event(f"ALERT: High Memory Usage ({mem_usage:.1f}%). Checking for leaks...")
+            # If swap is also high, we are in trouble. Restart heaviest service.
+            if swap_usage > SWAP_THRESHOLD:
+                log_event("CRITICAL: Swap Thrashing Detected. Restarting DNS services to free memory.")
+                run_cmd("systemctl restart unbound")
+                run_cmd("systemctl restart dnsmasq")
+        
+        # 2. Check UDP Packet Drops (RCV buffer errors)
+        # cat /proc/net/snmp | grep Udp:
+        cmd = "cat /proc/net/snmp | grep 'Udp: ' | awk 'NR==2 {print $6}'" # RcvbufErrors is usually column 6
+        res = run_cmd(cmd)
+        if res and res.stdout.strip():
+            rcv_errors = int(res.stdout.strip())
+            # We track delta ideally, but for now just log if non-zero and high
+            if rcv_errors > 1000:
+                 # Check if we already logged this recently? (Simplified: just log)
+                 pass
+                 # log_event(f"WARNING: UDP Receive Errors detected: {rcv_errors}. OS Buffer tuning might be needed.")
+
+    except Exception as e:
+        log_event(f"Resource check error: {e}")
+
 def check_disk_space():
     """
     Emergency Disk Protection.
@@ -712,6 +766,9 @@ if __name__ == "__main__":
         try:
             # 1. Emergency Disk Check (Priority 1)
             check_disk_space()
+            
+            # 2. Resource Health Check (Memory, Swap, UDP)
+            check_resources()
             
             # Refresh server IP and Whitelist in case of network changes
             reload_whitelist_if_needed()

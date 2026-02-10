@@ -1,0 +1,15 @@
+network:
+  ethernets:
+    ens18:
+      addresses:
+      - 103.68.213.74/30
+      - 2001:df2:440:4444:b41c:a12:212:212/64
+      nameservers:
+        addresses:
+        - 127.0.0.1
+      routes:
+      - to: default
+        via: 103.68.213.73
+      - to: default
+        via: 2001:df2:440:4444::1
+  version: 2

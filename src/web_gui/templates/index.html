@@ -1,0 +1,1809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PT MARS DATA TELEKOMUNIKASI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --neon-blue: #00f2ff;
+            --neon-purple: #bc13fe;
+            --dark-bg: #050b18;
+        }
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: var(--dark-bg);
+            background-image: 
+                radial-gradient(circle at 20% 30%, rgba(0, 242, 255, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 80% 70%, rgba(188, 19, 254, 0.05) 0%, transparent 40%);
+            color: #e2e8f0;
+            min-height: 100vh;
+        }
+        .font-orbitron { font-family: 'Orbitron', sans-serif; }
+        .glass { 
+            background: rgba(15, 23, 42, 0.6); 
+            backdrop-filter: blur(12px); 
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+        }
+        .status-on { color: var(--neon-blue); text-shadow: 0 0 8px rgba(0, 242, 255, 0.5); }
+        .status-off { color: #ef4444; text-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
+        .card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .card:hover { 
+            transform: translateY(-5px); 
+            border-color: var(--neon-blue);
+        }
+        pre { background: #0a0f1d; color: var(--neon-blue); border: 1px solid rgba(0, 242, 255, 0.1); font-size: 10px; line-height: 1.2; }
+        .progress-bar { height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, var(--neon-blue), var(--neon-purple)); transition: width 0.5s ease; }
+        
+        /* Fullscreen Support */
+        .fullscreen-mode {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            z-index: 9999 !important;
+            background: var(--dark-bg) !important;
+            padding: 2rem !important;
+            border-radius: 0 !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+        .fullscreen-mode .chart-wrapper {
+            flex-grow: 1 !important;
+            height: auto !important;
+        }
+        .fullscreen-mode canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        .fullscreen-exit-btn {
+            display: none;
+        }
+        .fullscreen-mode .fullscreen-exit-btn {
+            display: block;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <!-- Login Modal -->
+    <div id="login-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-md space-y-6 border border-blue-500/30">
+            <div class="text-center">
+                <h2 class="text-2xl font-orbitron text-white mb-2">ACCESS LOCKED</h2>
+                <p class="text-slate-400 text-xs tracking-widest">PT MARS DATA TELEKOMUNIKASI</p>
+            </div>
+            <div class="space-y-4">
+                <input type="password" id="login-password" placeholder="ENTER ACCESS PASSWORD" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-center text-white focus:outline-none focus:border-blue-500 font-orbitron tracking-widest">
+                <button onclick="attemptLogin()" id="login-btn" class="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-orbitron rounded-xl transition shadow-[0_0_20px_rgba(37,99,235,0.3)]">UNLOCK SYSTEM</button>
+                <p id="login-error" class="text-red-500 text-[10px] text-center hidden">INVALID ACCESS KEY</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="password-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-md space-y-6 border border-purple-500/30">
+            <div class="text-center">
+                <h2 class="text-2xl font-orbitron text-white mb-2">SECURITY UPDATE</h2>
+                <p class="text-slate-400 text-xs tracking-widest">CHANGE ACCESS PASSWORD</p>
+            </div>
+            <div class="space-y-4">
+                <input type="password" id="new-password" placeholder="NEW PASSWORD" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-center text-white focus:outline-none focus:border-purple-500 font-orbitron">
+                <input type="password" id="confirm-password" placeholder="CONFIRM NEW PASSWORD" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-center text-white focus:outline-none focus:border-purple-500 font-orbitron">
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="closePasswordModal()" class="py-3 bg-slate-800 hover:bg-slate-700 text-white font-orbitron rounded-xl transition">CANCEL</button>
+                    <button onclick="submitNewPassword()" class="py-3 bg-purple-600 hover:bg-purple-500 text-white font-orbitron rounded-xl transition">UPDATE</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Digtest Result Modal -->
+    <div id="dig-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-2xl space-y-6 border border-blue-500/30">
+            <div class="flex justify-between items-center border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-2xl font-orbitron text-white">QUERY RESULT</h2>
+                    <p id="dig-modal-subtitle" class="text-blue-400 text-[10px] tracking-widest uppercase">DEEP INSPECTION SUCCESS</p>
+                </div>
+                <button onclick="closeDigModal()" class="text-slate-400 hover:text-white transition p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="relative">
+                <pre id="dig-modal-result" class="max-h-[400px] overflow-y-auto rounded-xl p-6 text-sm font-mono leading-relaxed border border-white/5 bg-black/40"></pre>
+                <div class="absolute top-4 right-4 animate-pulse">
+                    <span class="w-2 h-2 bg-blue-500 rounded-full inline-block"></span>
+                </div>
+            </div>
+            <div class="flex justify-end">
+                <button onclick="closeDigModal()" class="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-orbitron rounded-xl transition shadow-lg shadow-blue-900/20">CLOSE RESULT</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Domain List Modal -->
+    <div id="list-modal" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-xl space-y-6 border border-blue-500/30">
+            <div class="flex justify-between items-center border-b border-white/10 pb-4">
+                <div>
+                    <h2 id="list-modal-title" class="text-2xl font-orbitron text-white">DOMAIN LIST</h2>
+                    <p id="list-modal-subtitle" class="text-blue-400 text-[10px] tracking-widest uppercase">MANAGE ENTRIES</p>
+                </div>
+                <button onclick="closeListModal()" class="text-slate-400 hover:text-white transition p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div id="list-modal-content" class="max-h-[400px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                <!-- List items will be injected here -->
+            </div>
+            <div class="flex justify-end pt-4 border-t border-white/10">
+                <button onclick="closeListModal()" class="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white font-orbitron rounded-xl transition">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Secondary Setup Modal -->
+    <div id="secondary-setup-modal" class="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 backdrop-blur-md hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-3xl space-y-6 border border-orange-500/30 overflow-hidden">
+            <div class="flex justify-between items-center border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-2xl font-orbitron text-white">SECONDARY SETUP</h2>
+                    <p class="text-orange-400 text-[10px] tracking-widest uppercase">HIGH AVAILABILITY CLUSTER GUIDE</p>
+                </div>
+                <button onclick="closeSecondaryModal()" class="text-slate-400 hover:text-white transition p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="space-y-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                <!-- Step 1 -->
+                <div class="space-y-3">
+                    <div class="flex items-center gap-3">
+                        <span class="w-6 h-6 rounded-full bg-orange-500 text-black flex items-center justify-center text-xs font-bold">1</span>
+                        <h3 class="text-sm font-orbitron text-white uppercase">Copy Installer Script</h3>
+                    </div>
+                    <p class="text-[11px] text-slate-400 pl-9">Jalankan perintah ini di VM Secondary untuk mengambil script installer dari VM Primary.</p>
+                    <div class="ml-9 bg-black/40 border border-white/5 rounded-xl p-3 relative group">
+                        <code id="cmd-copy" class="text-[10px] text-blue-300 font-mono break-all block pr-12">scp user@PRIMARY_IP:/home/dns/setup_secondary.sh .</code>
+                        <button onclick="copyText('cmd-copy')" class="absolute right-3 top-3 text-[10px] text-slate-500 hover:text-white transition uppercase font-orbitron">COPY</button>
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="space-y-3">
+                    <div class="flex items-center gap-3">
+                        <span class="w-6 h-6 rounded-full bg-orange-500 text-black flex items-center justify-center text-xs font-bold">2</span>
+                        <h3 class="text-sm font-orbitron text-white uppercase">Run Installation</h3>
+                    </div>
+                    <p class="text-[11px] text-slate-400 pl-9">Gunakan perintah di bawah ini untuk memulai instalasi otomatis dan sinkronisasi awal.</p>
+                    <div class="ml-9 bg-black/40 border border-white/5 rounded-xl p-3 relative group">
+                        <code id="cmd-install" class="text-[10px] text-orange-300 font-mono break-all block pr-12">sudo bash setup_secondary.sh PRIMARY_IP SYNC_TOKEN</code>
+                        <button onclick="copyText('cmd-install')" class="absolute right-3 top-3 text-[10px] text-slate-500 hover:text-white transition uppercase font-orbitron">COPY</button>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="space-y-3">
+                    <div class="flex items-center gap-3">
+                        <span class="w-6 h-6 rounded-full bg-orange-500 text-black flex items-center justify-center text-xs font-bold">3</span>
+                        <h3 class="text-sm font-orbitron text-white uppercase">Verify Sync</h3>
+                    </div>
+                    <p class="text-[11px] text-slate-400 pl-9">Setelah selesai, VM Secondary akan otomatis sinkron setiap 5 menit. Anda dapat memantau log sinkronisasi dengan perintah:</p>
+                    <div class="ml-9 bg-black/40 border border-white/5 rounded-xl p-3 relative group">
+                        <code id="cmd-log" class="text-[10px] text-green-300 font-mono break-all block pr-12">tail -f /var/log/dns_sync.log</code>
+                        <button onclick="copyText('cmd-log')" class="absolute right-3 top-3 text-[10px] text-slate-500 hover:text-white transition uppercase font-orbitron">COPY</button>
+                    </div>
+                </div>
+
+                <div class="ml-9 p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl">
+                    <p class="text-[10px] text-orange-400 leading-relaxed italic">
+                        <strong>Catatan:</strong> Pastikan port 80/443 (Web GUI) di VM Primary dapat diakses oleh VM Secondary untuk proses sinkronisasi database.
+                    </p>
+                </div>
+            </div>
+
+            <div class="flex justify-end pt-4 border-t border-white/10">
+                <button onclick="closeSecondaryModal()" class="px-8 py-3 bg-orange-600 hover:bg-orange-500 text-white font-orbitron rounded-xl transition shadow-lg shadow-orange-900/20">DONE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Guardian Settings Modal -->
+    <div id="guardian-modal" class="fixed inset-0 z-[120] flex items-center justify-center bg-black/90 backdrop-blur-md hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-lg space-y-6 border border-blue-500/30">
+            <div class="flex justify-between items-center border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-2xl font-orbitron text-white">GUARDIAN SETTINGS</h2>
+                    <p class="text-blue-400 text-[10px] tracking-widest uppercase">PERFORMANCE & SECURITY LIMITS</p>
+                </div>
+                <button onclick="closeGuardianModal()" class="text-slate-400 hover:text-white transition p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="space-y-4">
+                <!-- Guardian Config -->
+                <div class="space-y-2">
+                    <label class="text-xs font-orbitron text-slate-400">BAN THRESHOLD (Queries)</label>
+                    <input type="number" id="cfg-ban-threshold" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    <p class="text-[9px] text-slate-500">Limit query sebelum IP diblokir permanen (Default: 10000)</p>
+                </div>
+                
+                <div class="space-y-2">
+                    <label class="text-xs font-orbitron text-slate-400">MALICIOUS THRESHOLD (Queries/Min)</label>
+                    <input type="number" id="cfg-malicious-threshold" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    <p class="text-[9px] text-slate-500">Limit query per menit untuk deteksi serangan (Default: 200)</p>
+                </div>
+                
+                <!-- DNSMasq Config -->
+                <div class="space-y-2 pt-4 border-t border-white/10">
+                    <label class="text-xs font-orbitron text-slate-400">DNS FORWARD MAX (Concurrent)</label>
+                    <input type="number" id="cfg-forward-max" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    <p class="text-[9px] text-slate-500">Maksimum concurrent queries yang diteruskan (Default: 1500)</p>
+                </div>
+                
+                <div class="space-y-2">
+                    <label class="text-xs font-orbitron text-slate-400">CACHE SIZE</label>
+                    <input type="number" id="cfg-cache-size" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    <p class="text-[9px] text-slate-500">Ukuran cache DNS (Default: 1000)</p>
+                </div>
+            </div>
+
+            <div class="flex justify-end pt-4 border-t border-white/10">
+                <button onclick="saveGuardianConfig()" class="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-orbitron rounded-xl transition shadow-lg shadow-blue-900/20">SAVE CHANGES</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <header class="mb-8 flex flex-col lg:flex-row justify-between items-center gap-6">
+            <div class="flex items-center gap-4">
+                <div class="w-16 h-16 bg-white rounded-full p-1 flex items-center justify-center overflow-hidden shadow-[0_0_20px_rgba(255,255,255,0.1)]">
+                    <img src="/static/img/logo_mars.jpeg" alt="MARS Logo" onerror="this.src='https://api.dicebear.com/7.x/initials/svg?seed=MARS&backgroundColor=003399'" class="w-full h-full object-contain">
+                </div>
+                <div>
+                    <h1 class="text-2xl md:text-3xl font-bold font-orbitron tracking-wider text-white">PT MARS DATA TELEKOMUNIKASI</h1>
+                    <div class="flex items-center gap-4 mt-1">
+                            <p class="text-blue-400 font-medium tracking-widest text-xs">DUAL STACK DNS ENGINE ft AI <span id="header-node-role" class="ml-2 text-white bg-blue-600 px-2 py-0.5 rounded text-[8px]">PRIMARY</span></p>
+                            <button onclick="openPasswordModal()" class="text-[9px] text-slate-500 hover:text-purple-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">CHANGE PWD</button>
+                            <button onclick="logout()" class="text-[9px] text-slate-500 hover:text-red-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">LOGOUT</button>
+                        </div>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-4 gap-4 w-full lg:w-auto">
+                <div class="glass p-3 rounded-xl min-w-[110px]">
+                    <span class="text-[10px] uppercase text-slate-400 block mb-1">CPU</span>
+                    <div class="flex items-end gap-1"><span id="metric-cpu" class="text-xl font-orbitron text-white">0</span><span class="text-xs text-slate-500 mb-1">%</span></div>
+                    <div class="progress-bar mt-2"><div id="bar-cpu" class="progress-fill" style="width: 0%"></div></div>
+                </div>
+                <div class="glass p-3 rounded-xl min-w-[110px]">
+                    <span class="text-[10px] uppercase text-slate-400 block mb-1">RAM</span>
+                    <div class="flex items-end gap-1"><span id="metric-ram" class="text-xl font-orbitron text-white">0</span><span class="text-xs text-slate-500 mb-1">%</span></div>
+                    <div class="progress-bar mt-2"><div id="bar-ram" class="progress-fill" style="width: 0%"></div></div>
+                </div>
+                <div class="glass p-3 rounded-xl min-w-[110px]">
+                    <span class="text-[10px] uppercase text-slate-400 block mb-1">HDD</span>
+                    <div class="flex items-end gap-1"><span id="metric-hdd" class="text-xl font-orbitron text-white">0</span><span class="text-xs text-slate-500 mb-1">%</span></div>
+                    <div class="progress-bar mt-2"><div id="bar-hdd" class="progress-fill" style="width: 0%"></div></div>
+                </div>
+                <div class="glass p-3 rounded-xl min-w-[110px]">
+                    <span class="text-[10px] uppercase text-slate-400 block mb-1">DNS</span>
+                    <div class="flex items-end gap-1"><span id="metric-perf" class="text-xl font-orbitron text-white">0</span><span class="text-xs text-slate-500 mb-1">%</span></div>
+                    <div class="progress-bar mt-2"><div id="bar-perf" class="progress-fill" style="width: 0%"></div></div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Layout -->
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            
+            <!-- Left Column: Status & Actions -->
+            <div class="lg:col-span-1 space-y-6">
+                <!-- System Role Card -->
+                <div id="role-card" class="glass p-5 rounded-2xl border border-blue-500/20 shadow-lg">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-sm font-orbitron text-blue-400">SYSTEM NODE</h2>
+                        <span id="node-role-badge" class="px-2 py-0.5 rounded text-[9px] font-orbitron bg-blue-500/20 text-blue-400 border border-blue-500/30">PRIMARY</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="switchRole('PRIMARY')" id="btn-role-primary" class="py-2 rounded-lg text-[9px] font-orbitron border border-blue-500 bg-blue-600 text-white transition shadow-lg shadow-blue-900/20">PRIMARY DNS</button>
+                        <button onclick="switchRole('SECONDARY')" id="btn-role-secondary" class="py-2 rounded-lg text-[9px] font-orbitron border border-white/5 bg-slate-800 text-slate-400 hover:bg-slate-700 transition">SECONDARY DNS</button>
+                    </div>
+                    <div id="sync-status-info" class="mt-4 pt-3 border-t border-white/10 hidden">
+                        <div class="flex justify-between items-center text-[9px]">
+                            <span class="text-slate-500">LAST SYNC:</span>
+                            <span id="last-sync-time" class="text-orange-400 font-mono">NEVER</span>
+                        </div>
+                        <div class="flex justify-between items-center text-[9px] mt-1">
+                            <span class="text-slate-500">REMOTE IP:</span>
+                            <span id="remote-node-ip" class="text-blue-400 font-mono">NONE</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Status -->
+                <div class="glass p-5 rounded-2xl space-y-4">
+                    <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2">SYSTEM STATUS</h2>
+                    <div class="grid grid-cols-1 gap-3">
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">DNSMASQ</span><span id="status-dnsmasq" class="text-xs font-orbitron">...</span></div>
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">UNBOUND</span><span id="status-unbound" class="text-xs font-orbitron">...</span></div>
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">DNSSEC</span><span id="status-dnssec" class="text-xs font-orbitron">...</span></div>
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">GUARDIAN</span><span id="status-guardian" class="text-xs font-orbitron">...</span></div>
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">DDoS PROT</span><span id="status-security" class="text-xs font-orbitron">...</span></div>
+                        <div class="flex justify-between items-center"><span class="text-xs text-slate-400">NAT INTCP</span><span id="status-iptables" class="text-xs font-orbitron">...</span></div>
+                    </div>
+                </div>
+
+                <!-- Control Center -->
+                <div class="glass p-5 rounded-2xl space-y-3">
+                    <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2">CONTROL CENTER</h2>
+                    <div class="grid grid-cols-1 gap-2">
+                        <button onclick="doAction('restart_dnsmasq')" class="text-left px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl transition group">
+                            <span class="block text-[10px] text-slate-500 font-orbitron">SERVICE</span><span class="text-xs font-bold text-white">RESTART DNSMASQ</span>
+                        </button>
+                        <button onclick="doAction('restart_unbound')" class="text-left px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl transition group">
+                            <span class="block text-[10px] text-slate-500 font-orbitron">SERVICE</span><span class="text-xs font-bold text-white">RESTART UNBOUND</span>
+                        </button>
+                        <button onclick="doAction('malware_shield')" class="text-left px-4 py-3 bg-red-900/20 hover:bg-red-900/40 border border-red-500/30 rounded-xl transition group">
+                            <span class="block text-[10px] text-red-400 font-orbitron">PROTECTION</span><span class="text-xs font-bold text-white">MALWARE SHIELD</span>
+                        </button>
+                        <button onclick="openGuardianModal()" class="text-left px-4 py-3 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-500/30 rounded-xl transition group">
+                            <span class="block text-[10px] text-blue-400 font-orbitron">CONFIGURATION</span><span class="text-xs font-bold text-white">GUARDIAN SETTINGS</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Banned IP Management -->
+                <div class="glass p-5 rounded-2xl space-y-3">
+                    <div class="flex justify-between items-center border-b border-white/10 pb-2">
+                        <h2 class="text-sm font-orbitron text-red-400">BLOCKED IPs</h2>
+                        <button onclick="fetchBannedIps()" class="text-[9px] text-slate-500 hover:text-red-400 font-orbitron">REFRESH</button>
+                    </div>
+                    <div id="banned-ips-list" class="max-h-[200px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                        <p class="text-[10px] text-slate-500 text-center py-2">Loading banned IPs...</p>
+                    </div>
+                </div>
+
+                <!-- Upstream DNS -->
+                <div class="glass p-5 rounded-2xl space-y-3">
+                    <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2">UPSTREAM DNS</h2>
+                    <div class="space-y-2">
+                        <input type="text" id="dns-ip-input" placeholder="e.g. 8.8.8.8" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-blue-500">
+                        <button onclick="changeDnsIp()" class="w-full py-2 bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/30 rounded-lg text-[10px] font-orbitron text-white transition">UPDATE UPSTREAM</button>
+                    </div>
+                </div>
+
+                <!-- Documentation -->
+                <div class="glass p-5 rounded-2xl space-y-3">
+                    <h2 class="text-sm font-orbitron text-purple-400 border-b border-white/10 pb-2">DOCUMENTATION</h2>
+                    <div class="grid grid-cols-1 gap-2">
+                        <a href="/api/manual/html" target="_blank" class="text-left px-4 py-3 bg-purple-900/20 hover:bg-purple-900/40 border border-purple-500/30 rounded-xl transition group flex flex-col">
+                            <span class="block text-[10px] text-purple-400 font-orbitron">READ ONLINE</span>
+                            <span class="text-xs font-bold text-white">SYSTEM MANUAL (HTML)</span>
+                        </a>
+                        <a href="/api/manual/pdf" class="text-left px-4 py-3 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-500/30 rounded-xl transition group flex flex-col">
+                            <span class="block text-[10px] text-blue-400 font-orbitron">DOWNLOAD</span>
+                            <span class="text-xs font-bold text-white">PDF VERSION</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle Column: Traffic & Logs -->
+            <div class="lg:col-span-2 space-y-6">
+                <div id="traffic-container" class="glass p-6 rounded-2xl h-[400px] transition-all duration-300">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center gap-2">
+                            <h2 class="text-sm font-orbitron text-white uppercase tracking-wider">Traffic Analysis</h2>
+                            <button onclick="toggleFullscreen('traffic-container')" class="fullscreen-exit-btn text-xs bg-red-500/20 hover:bg-red-500/40 text-red-400 px-3 py-1 rounded-lg border border-red-500/30 transition font-orbitron">EXIT FULLSCREEN</button>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div class="flex items-center bg-slate-900/50 rounded-lg p-1 border border-white/5">
+                                <button onclick="setTrafficRange('live')" id="btn-range-live" class="text-[8px] font-orbitron px-2 py-1 rounded transition bg-blue-600 text-white">LIVE</button>
+                                <button onclick="setTrafficRange('daily')" id="btn-range-daily" class="text-[8px] font-orbitron px-2 py-1 rounded transition text-slate-500 hover:text-white">24H</button>
+                                <button onclick="setTrafficRange('monthly')" id="btn-range-monthly" class="text-[8px] font-orbitron px-2 py-1 rounded transition text-slate-500 hover:text-white">30D</button>
+                                <button onclick="setTrafficRange('yearly')" id="btn-range-yearly" class="text-[8px] font-orbitron px-2 py-1 rounded transition text-slate-500 hover:text-white">12M</button>
+                            </div>
+                            <button onclick="downloadTrafficPDF()" class="text-[8px] font-orbitron px-2 py-1.5 rounded bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/40 transition flex items-center gap-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                                </svg>
+                                PDF
+                            </button>
+                            <button onclick="toggleFullscreen('traffic-container')" class="text-slate-400 hover:text-white transition p-1" title="Toggle Fullscreen">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="h-[320px] chart-wrapper"><canvas id="trafficChart"></canvas></div>
+                </div>
+
+                <!-- Combined Traffic Analysis -->
+                <div id="combined-traffic-container" class="glass p-6 rounded-2xl h-[350px] transition-all duration-300">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-sm font-orbitron text-white uppercase tracking-wider">SERVFAIL & BLOCKLIST ANALYSIS</h2>
+                        <div class="flex items-center gap-2">
+                            <span id="combined-count" class="text-xs font-orbitron text-slate-300">Loading...</span>
+                            <button onclick="toggleFullscreen('combined-traffic-container')" class="text-slate-400 hover:text-white transition p-1" title="Toggle Fullscreen">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="h-[280px] chart-wrapper"><canvas id="combinedTrafficChart"></canvas></div>
+                </div>
+
+                <div class="glass p-6 rounded-2xl hidden" id="guardian-logs-container">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-sm font-orbitron text-cyan-400">GUARDIAN AUTO-DEFENSE</h2>
+                        <span class="text-[10px] text-cyan-500 animate-pulse">SHIELD ACTIVE</span>
+                    </div>
+                    <pre id="guardian-logs" class="max-h-[100px] overflow-y-auto rounded-lg p-3 text-cyan-400 border-cyan-900/50 bg-cyan-950/20"></pre>
+                </div>
+
+                <div class="glass p-6 rounded-2xl">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-sm font-orbitron text-white">SYSTEM LOGS</h2>
+                        <button onclick="fetchLogs()" class="text-[10px] text-blue-400 hover:underline">REFRESH LOGS</button>
+                    </div>
+                    <pre id="logs-content" class="h-[150px] overflow-y-auto rounded-lg p-3">Waiting for logs...</pre>
+                </div>
+
+                <!-- Global Whitelist (Moved for better visibility) -->
+                <div class="glass p-6 rounded-2xl space-y-4">
+                    <div class="flex justify-between items-center border-b border-white/10 pb-2">
+                        <h2 class="text-sm font-orbitron text-cyan-400">GLOBAL WHITELIST</h2>
+                        <span class="text-[9px] text-slate-500">IPs here bypass all security blocks</span>
+                    </div>
+                    <div class="space-y-3">
+                        <textarea id="whitelist-input" placeholder="1.2.3.4&#10;192.168.1.0/24" class="w-full h-32 bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-xs text-cyan-400 font-mono focus:outline-none focus:border-cyan-500"></textarea>
+                        <button onclick="updateWhitelist()" class="w-full py-3 bg-cyan-600/20 hover:bg-cyan-600/40 border border-cyan-500/30 rounded-xl text-xs font-orbitron text-white transition">APPLY & SAVE WHITELIST</button>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <button onclick="doAction('update_ssh')" class="text-left px-4 py-3 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-500/30 rounded-xl transition group">
+                        <span class="block text-[10px] text-blue-400 font-orbitron">SECURITY</span><span class="text-xs font-bold text-white">UPDATE SSH</span>
+                    </button>
+                    <button onclick="doAction('update_firewall')" class="text-left px-4 py-3 bg-purple-900/20 hover:bg-purple-900/40 border border-purple-500/30 rounded-xl transition group">
+                        <span class="block text-[10px] text-purple-400 font-orbitron">SECURITY</span><span class="text-xs font-bold text-white">UPDATE FIREWALL</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Column: Query & Lists -->
+            <div class="lg:col-span-1 space-y-6">
+                <!-- Deep Query Test -->
+                <div class="glass p-5 rounded-2xl space-y-4">
+                    <div class="flex justify-between items-center border-b border-white/10 pb-2">
+                        <h2 class="text-sm font-orbitron text-blue-400">DEEP QUERY TEST</h2>
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex gap-2">
+                            <input type="text" id="domain-input" placeholder="Enter domain..." class="flex-1 bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500 transition">
+                            <select id="qtype-input" class="bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-2 text-[10px] text-white focus:outline-none">
+                                <option value="A">A</option>
+                                <option value="AAAA">AAAA</option>
+                                <option value="MX">MX</option>
+                                <option value="TXT">TXT</option>
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-1 gap-2">
+                            <button onclick="runDig()" id="dig-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-orbitron text-[10px] py-2 rounded-lg transition shadow-lg shadow-blue-900/20">EXECUTE QUERY</button>
+                            
+                            <div class="grid grid-cols-2 gap-2">
+                                <button onclick="doActionWithDomain('blacklist')" class="w-full bg-red-900/40 hover:bg-red-900/60 text-red-400 border border-red-500/30 font-orbitron text-[10px] py-2 rounded-lg transition">ADD BLACKLIST</button>
+                                <button onclick="doActionWithDomain('whitelist')" class="w-full bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-500/30 font-orbitron text-[10px] py-2 rounded-lg transition">ADD WHITELIST</button>
+                            </div>
+
+                            <!-- View List Buttons (Prominent) -->
+                            <div class="pt-4 border-t border-white/10 space-y-2">
+                                <p class="text-[9px] text-slate-500 font-orbitron uppercase tracking-widest text-center">DATABASE VIEWER</p>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button onclick="openListModal('blacklist')" class="flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 py-2.5 rounded-xl transition text-[10px] font-orbitron group shadow-lg shadow-red-900/10">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 group-hover:scale-110 transition" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                                        </svg>
+                                        LIST BLACKLIST
+                                    </button>
+                                    <button onclick="openListModal('whitelist')" class="flex items-center justify-center gap-2 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 py-2.5 rounded-xl transition text-[10px] font-orbitron group shadow-lg shadow-green-900/10">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 group-hover:scale-110 transition" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                                        </svg>
+                                        LIST WHITELIST
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- IPv6 Management -->
+                <div class="glass p-5 rounded-2xl space-y-4">
+                    <h2 class="text-sm font-orbitron text-purple-400 border-b border-white/10 pb-2">NETWORK MANAGEMENT</h2>
+                    
+                    <!-- IPv4 Section -->
+                    <div class="space-y-2">
+                        <span class="text-[10px] text-blue-400 font-orbitron">IPV4 CONFIGURATION</span>
+                        <input type="text" id="ip4-addr-input" placeholder="IP Address/Prefix (e.g. 103.68.213.74/30)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-blue-500">
+                        <input type="text" id="ip4-gw-input" placeholder="Gateway (e.g. 103.68.213.73)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <div class="border-t border-white/5 pt-2 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] text-purple-400 font-orbitron">IPV6 CONFIGURATION</span>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="ipv6-toggle" onchange="toggleIpv6()" class="sr-only peer">
+                                <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                            </label>
+                        </div>
+                        <input type="text" id="ip6-addr-input" oninput="if(this.value && !document.getElementById('ipv6-toggle').checked) document.getElementById('ipv6-toggle').checked = true;" placeholder="IPv6 Address/Prefix (e.g. 2001:db8::1/64)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-purple-500">
+                        <input type="text" id="ip6-gw-input" placeholder="IPv6 Gateway (e.g. 2001:db8::1)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-purple-500">
+                    </div>
+
+                    <button onclick="updateNetwork()" class="w-full py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-orbitron text-[10px] rounded-lg transition shadow-lg">APPLY NETWORK CHANGES</button>
+                    <p class="text-[9px] text-red-400 text-center">Warning: Incorrect settings may disconnect the server!</p>
+                </div>
+
+                <!-- DNS Trust / Internet Positif -->
+                <div class="glass p-5 rounded-2xl space-y-4">
+                    <h2 class="text-sm font-orbitron text-green-400 border-b border-white/10 pb-2">INTERNET POSITIF</h2>
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <span class="text-[10px] text-slate-400 font-orbitron block">LOCAL FILTERING</span>
+                            <span class="text-[8px] text-slate-600 font-mono">Auto-Block Porn/Gambling</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="trust-toggle" onchange="toggleTrust()" class="sr-only peer">
+                            <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                        </label>
+                    </div>
+                    <div class="space-y-2">
+                        <!-- Removed IP Input - Using Local Database -->
+                        <div class="bg-slate-900/50 p-3 rounded-lg border border-white/5">
+                            <p class="text-[9px] text-slate-400 leading-relaxed">
+                                <span class="text-green-400 font-bold">MODE MANDIRI:</span> Menggunakan database lokal (StevenBlack Unified) untuk memblokir konten negatif tanpa bergantung pada DNS luar.
+                            </p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="toggleTrust()" class="w-full py-2 bg-green-600/20 hover:bg-green-600/40 border border-green-500/30 rounded-lg text-[10px] font-orbitron text-white transition">APPLY SETTING</button>
+                            <button onclick="openTrustScheduleModal()" class="w-full py-2 bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/30 rounded-lg text-[10px] font-orbitron text-white transition">SET SCHEDULE</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Secondary DNS Sync -->
+                <div class="glass p-5 rounded-2xl space-y-4">
+                    <div class="flex justify-between items-center border-b border-white/10 pb-2">
+                        <h2 class="text-sm font-orbitron text-orange-400">SECONDARY DNS SYNC</h2>
+                        <span class="text-[9px] text-orange-500/50 animate-pulse">HA CLUSTER READY</span>
+                    </div>
+                    <div class="space-y-3">
+                        <p class="text-[9px] text-slate-400 leading-relaxed uppercase tracking-tighter">Sync your blacklist/whitelist to another VM automatically.</p>
+                        <div class="bg-slate-950/50 border border-orange-500/20 rounded-xl p-3 space-y-2">
+                            <div class="flex justify-between items-center">
+                                <span class="text-[9px] text-orange-400 font-orbitron">SYNC TOKEN</span>
+                                <button onclick="copyToClipboard('sync-token-text')" class="text-[9px] text-blue-400 hover:underline">COPY</button>
+                            </div>
+                            <code id="sync-token-text" class="block text-[10px] text-white font-mono break-all bg-black/30 p-2 rounded border border-white/5">Loading...</code>
+                        </div>
+                        <button onclick="showSyncInstructions()" class="w-full py-2 bg-orange-600/20 hover:bg-orange-600/40 border border-orange-500/30 rounded-lg text-[10px] font-orbitron text-white transition">HOW TO SETUP SECONDARY</button>
+                    </div>
+                </div>
+
+                <!-- Cache Info -->
+                <div class="glass p-5 rounded-2xl">
+                    <h2 class="text-sm font-orbitron text-blue-400 border-b border-white/10 pb-2 mb-4">CACHE MANAGEMENT</h2>
+                    <button onclick="doAction('clear_cache')" class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl border border-white/5 transition flex flex-col items-center">
+                        <span class="text-xs font-bold">FLUSH DNS CACHE</span>
+                        <span class="text-[9px] text-slate-500 font-orbitron">PURGE ALL RECORDS</span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- DNS Trust Schedule Modal -->
+    <div id="trust-schedule-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] hidden flex items-center justify-center p-4">
+        <div class="glass max-w-md w-full rounded-2xl border border-blue-500/30 shadow-2xl overflow-hidden">
+            <div class="bg-gradient-to-r from-blue-600/20 to-green-600/20 p-5 border-b border-white/10">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h3 class="text-blue-400 font-orbitron text-sm">DNS TRUST SCHEDULER</h3>
+                        <p class="text-[9px] text-slate-500 font-orbitron mt-1 uppercase">Automated Trust Switching</p>
+                    </div>
+                    <button onclick="closeTrustScheduleModal()" class="text-slate-500 hover:text-white transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="p-6 space-y-5">
+                <div class="flex items-center justify-between bg-slate-900/50 p-3 rounded-xl border border-white/5">
+                    <span class="text-[10px] text-slate-300 font-orbitron">ACTIVATE SCHEDULE</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="sched-enabled" class="sr-only peer">
+                        <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="space-y-2">
+                        <label class="text-[9px] text-blue-400 font-orbitron">START TIME (JAM)</label>
+                        <input type="time" id="sched-start" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-[9px] text-red-400 font-orbitron">END TIME (JAM)</label>
+                        <input type="time" id="sched-end" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+                    </div>
+                </div>
+
+                <div class="space-y-2">
+                    <label class="text-[9px] text-green-400 font-orbitron">TRUST DNS IP</label>
+                    <input type="text" id="sched-ips" placeholder="e.g. 1.1.1.1, 8.8.4.4" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-green-500">
+                    <p class="text-[8px] text-slate-500">Sistem akan otomatis mengaktifkan DNS Trust pada jam yang ditentukan.</p>
+                </div>
+
+                <button onclick="saveTrustSchedule()" class="w-full py-3 bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-500 hover:to-green-500 text-white font-orbitron text-[10px] rounded-xl transition shadow-lg shadow-blue-900/20">SAVE SCHEDULE SETTINGS</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- GUARDIAN CONFIG FUNCTIONS ---
+        function openGuardianModal() {
+            document.getElementById('guardian-modal').classList.remove('hidden');
+            loadGuardianConfig();
+        }
+
+        function closeGuardianModal() {
+            document.getElementById('guardian-modal').classList.add('hidden');
+        }
+
+        async function loadGuardianConfig() {
+            try {
+                const res = await fetch('/api/guardian/config');
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    document.getElementById('cfg-ban-threshold').value = data.guardian.ban_threshold;
+                    document.getElementById('cfg-malicious-threshold').value = data.guardian.malicious_threshold;
+                    document.getElementById('cfg-forward-max').value = data.dnsmasq.dns_forward_max;
+                    document.getElementById('cfg-cache-size').value = data.dnsmasq.cache_size;
+                }
+            } catch (e) {
+                console.error("Error loading config:", e);
+                alert("Failed to load configuration");
+            }
+        }
+
+        async function saveGuardianConfig() {
+            const config = {
+                ban_threshold: document.getElementById('cfg-ban-threshold').value,
+                malicious_threshold: document.getElementById('cfg-malicious-threshold').value,
+                dns_forward_max: document.getElementById('cfg-forward-max').value,
+                cache_size: document.getElementById('cfg-cache-size').value
+            };
+            
+            try {
+                const res = await fetch('/api/guardian/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                
+                const result = await res.json();
+                if (result.status === 'success') {
+                    alert('Configuration saved successfully!');
+                    closeGuardianModal();
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (e) {
+                alert('Failed to save configuration: ' + e);
+            }
+        }
+
+        // --- AUTH FUNCTIONS ---
+        async function attemptLogin() {
+            const passwordInput = document.getElementById('login-password');
+            const password = passwordInput.value.trim(); // Trim any accidental spaces
+            const btn = document.getElementById('login-btn');
+            const error = document.getElementById('login-error');
+            
+            btn.disabled = true;
+            btn.innerText = 'VERIFYING...';
+            error.classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+                
+                if (res.ok) {
+                    document.getElementById('login-modal').classList.add('hidden');
+                    updateMetrics();
+                    setInterval(updateMetrics, 5000);
+                    setInterval(updateTraffic, 3000);
+                    updateCombinedTraffic();
+                } else {
+                    error.classList.remove('hidden');
+                }
+            } catch (e) {
+                error.innerText = 'CONNECTION ERROR';
+                error.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'UNLOCK SYSTEM';
+            }
+        }
+
+        async function logout() {
+            await fetch('/api/logout', { method: 'POST' });
+            location.reload();
+        }
+
+        function openPasswordModal() {
+            document.getElementById('password-modal').classList.remove('hidden');
+        }
+
+        function closePasswordModal() {
+            document.getElementById('password-modal').classList.add('hidden');
+            document.getElementById('new-password').value = '';
+            document.getElementById('confirm-password').value = '';
+        }
+
+        async function submitNewPassword() {
+            const newPwd = document.getElementById('new-password').value;
+            const confirmPwd = document.getElementById('confirm-password').value;
+
+            if (!newPwd || newPwd.length < 4) {
+                alert('Password too short (min 4 chars)');
+                return;
+            }
+            if (newPwd !== confirmPwd) {
+                alert('Passwords do not match');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/change_password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_password: newPwd })
+                });
+                
+                if (res.ok) {
+                    alert('Password updated successfully!');
+                    closePasswordModal();
+                } else {
+                    const data = await res.json();
+                    alert('Update failed: ' + data.message);
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+        }
+
+        // Add enter key listener for login
+        document.getElementById('login-password')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') attemptLogin();
+        });
+
+        const ctx = document.getElementById('trafficChart').getContext('2d');
+        
+        // Create gradient for QPS dataset
+        const qpsGradient = ctx.createLinearGradient(0, 0, 0, 320);
+        qpsGradient.addColorStop(0, 'rgba(255, 0, 255, 0.25)');
+        qpsGradient.addColorStop(0.5, 'rgba(255, 0, 255, 0.1)');
+        qpsGradient.addColorStop(1, 'rgba(255, 0, 255, 0.01)');
+        
+        // Create gradient for Queries dataset
+        const queryGradient = ctx.createLinearGradient(0, 0, 0, 320);
+        queryGradient.addColorStop(0, 'rgba(0, 242, 255, 0.15)');
+        queryGradient.addColorStop(0.5, 'rgba(0, 242, 255, 0.08)');
+        queryGradient.addColorStop(1, 'rgba(0, 242, 255, 0.02)');
+        
+        const trafficChart = new Chart(ctx, {
+            type: 'line',
+            data: { 
+                labels: [], 
+                datasets: [
+                    { 
+                        label: 'QPS', 
+                        data: [], 
+                        borderColor: '#ff00ff', 
+                        backgroundColor: qpsGradient,
+                        borderWidth: 2.5, 
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointBorderWidth: 0,
+                        pointHitRadius: 8,
+                        fill: true, 
+                        tension: 0.5,
+                        yAxisID: 'y1'
+                    },
+                    { 
+                        label: 'Snapshot Queries', 
+                        data: [], 
+                        borderColor: '#00f2ff', 
+                        backgroundColor: queryGradient,
+                        borderWidth: 2, 
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointBorderWidth: 0,
+                        pointHitRadius: 8,
+                        fill: true, 
+                        tension: 0.5,
+                        yAxisID: 'y'
+                    }
+                ] 
+            },
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false,
+                animation: {
+                    duration: 300,
+                    easing: 'easeInOutQuart',
+                    resize: {
+                        duration: 0
+                    },
+                    animateRotate: true,
+                    animateScale: false
+                },
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    tooltip: {
+                        enabled: true,
+                        backgroundColor: 'rgba(5, 11, 24, 0.95)',
+                        borderColor: '#ff00ff',
+                        borderWidth: 1,
+                        titleColor: '#00f2ff',
+                        bodyColor: '#64748b',
+                        boxPadding: 8,
+                        titleFont: { size: 11, family: 'Orbitron', weight: 'bold' },
+                        bodyFont: { size: 10 },
+                        padding: 12,
+                        titleMarginBottom: 8,
+                        displayColors: true,
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) label += ': ';
+                                if (context.parsed.y !== null) {
+                                    if (context.datasetIndex === 0) {
+                                        label += context.parsed.y.toFixed(0) + ' qps';
+                                    } else {
+                                        label += context.parsed.y.toLocaleString() + ' queries';
+                                    }
+                                }
+                                return label;
+                            },
+                            afterLabel: function(context) {
+                                if (context.datasetIndex === 0 && context.parsed.y > 90000) {
+                                    return '⚠ HIGH LOAD';
+                                }
+                                return '';
+                            }
+                        }
+                    }
+                },
+                scales: { 
+                    y: { 
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        beginAtZero: true, 
+                        grid: { 
+                            color: 'rgba(255, 255, 255, 0.06)',
+                            drawBorder: false
+                        }, 
+                        ticks: { 
+                            color: '#00f2ff', 
+                            font: { size: 11, weight: '600' },
+                            padding: 8,
+                            callback: function(value) {
+                                if (value >= 1000000) return (value/1000000).toFixed(1) + 'M';
+                                if (value >= 1000) return (value/1000).toFixed(1) + 'K';
+                                return value.toFixed(0);
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: '░ TOTAL QUERIES ░',
+                            color: '#00f2ff',
+                            font: { size: 10, family: 'Orbitron', weight: 'bold' }
+                        }
+                    }, 
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        beginAtZero: true,
+                        grid: { 
+                            drawOnChartArea: false,
+                            drawBorder: false
+                        },
+                        ticks: { 
+                            color: '#ff00ff', 
+                            font: { size: 11, weight: '600' },
+                            padding: 8,
+                            callback: function(value) {
+                                if (value >= 1000) return (value/1000).toFixed(1) + 'K';
+                                return value.toFixed(0);
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: '░ QPS ░',
+                            color: '#ff00ff',
+                            font: { size: 10, family: 'Orbitron', weight: 'bold' }
+                        }
+                    },
+                    x: { 
+                        grid: { 
+                            display: true,
+                            color: 'rgba(255, 255, 255, 0.03)',
+                            drawBorder: false
+                        }, 
+                        ticks: { 
+                            color: '#64748b', 
+                            font: { size: 11, weight: '500' },
+                            maxRotation: 45,
+                            minRotation: 0
+                        }
+                    } 
+                }, 
+                plugins: { 
+                    legend: { 
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            color: '#94a3b8',
+                            font: { size: 11, family: 'Orbitron', weight: '600' },
+                            boxWidth: 12,
+                            padding: 16,
+                            usePointStyle: true,
+                            pointStyle: 'circle'
+                        }
+                    }, 
+                    filler: {
+                        propagate: true
+                    }
+                } 
+            }
+        });
+
+        // Combined Traffic Chart (SERVFAIL + Blocklist)
+        const combinedCtx = document.getElementById('combinedTrafficChart').getContext('2d');
+        const combinedTrafficChart = new Chart(combinedCtx, {
+            type: 'bar',
+            data: { 
+                labels: [], 
+                datasets: [
+                    { 
+                        label: 'SERVFAIL Errors', 
+                        data: [], 
+                        backgroundColor: 'rgba(239, 68, 68, 0.6)',
+                        borderColor: '#ef4444',
+                        borderWidth: 2,
+                        borderRadius: 6,
+                        barThickness: 'flex',
+                        maxBarThickness: 40
+                    },
+                    { 
+                        label: 'Blocked Domains', 
+                        data: [], 
+                        backgroundColor: 'rgba(251, 191, 36, 0.6)',
+                        borderColor: '#fbbf24',
+                        borderWidth: 2,
+                        borderRadius: 6,
+                        barThickness: 'flex',
+                        maxBarThickness: 40
+                    }
+                ] 
+            },
+            options: { 
+                indexAxis: 'y',
+                responsive: true, 
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { 
+                        display: true,
+                        labels: { color: '#94a3b8' } 
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(5, 11, 24, 0.95)',
+                        borderColor: '#64748b',
+                        borderWidth: 1,
+                        bodyColor: '#cbd5e1',
+                        titleColor: '#f8fafc'
+                    }
+                },
+                scales: { 
+                    x: { 
+                        beginAtZero: true,
+                        grid: { color: 'rgba(255, 255, 255, 0.06)' },
+                        ticks: { color: '#94a3b8' }
+                    },
+                    y: { 
+                        grid: { display: false },
+                        ticks: { color: '#94a3b8', font: { size: 11 } }
+                    }
+                } 
+            }
+        });
+
+        let metricsInterval, trafficInterval;
+        let currentTrafficRange = 'live';
+
+        async function setTrafficRange(range) {
+            currentTrafficRange = range;
+            
+            // Update UI
+            ['live', 'daily', 'monthly', 'yearly'].forEach(r => {
+                const btn = document.getElementById(`btn-range-${r}`);
+                if (r === range) {
+                    btn.classList.add('bg-blue-600', 'text-white');
+                    btn.classList.remove('text-slate-500');
+                } else {
+                    btn.classList.remove('bg-blue-600', 'text-white');
+                    btn.classList.add('text-slate-500');
+                }
+            });
+
+            if (range === 'live') {
+                updateTraffic();
+            } else {
+                fetchTrafficHistory(range);
+            }
+        }
+
+        async function fetchTrafficHistory(range) {
+            try {
+                const res = await fetch(`/api/traffic/history?range=${range}`);
+                const data = await res.json();
+                
+                trafficChart.data.labels = data.map(d => d.time);
+                trafficChart.data.datasets[0].data = data.map(d => d.qps);
+                trafficChart.data.datasets[1].data = data.map(d => d.queries);
+                trafficChart.update('active');
+            } catch (e) { console.error(e); }
+        }
+
+        async function downloadTrafficPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            // PDF Header
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(18);
+            doc.setTextColor(0, 102, 204);
+            doc.text("PT MARS DATA TELEKOMUNIKASI", 105, 20, { align: "center" });
+            
+            doc.setFontSize(14);
+            doc.setTextColor(50, 50, 50);
+            doc.text("DNS TRAFFIC ANALYSIS REPORT", 105, 30, { align: "center" });
+            
+            doc.setFontSize(10);
+            doc.setFont("helvetica", "normal");
+            doc.text(`Report Type: ${currentTrafficRange.toUpperCase()}`, 20, 45);
+            doc.text(`Generated: ${new Date().toLocaleString()}`, 20, 52);
+            doc.text(`System: DNS MarsData ISP Scale`, 20, 59);
+
+            // Table Data
+            const tableData = trafficChart.data.labels.map((label, i) => [
+                label,
+                trafficChart.data.datasets[0].data[i] + " QPS",
+                trafficChart.data.datasets[1].data[i] + " Queries"
+            ]);
+
+            doc.autoTable({
+                startY: 65,
+                head: [['Period/Time', 'Average QPS', 'Total Queries']],
+                body: tableData,
+                theme: 'grid',
+                headStyles: { fillColor: [0, 242, 255], textColor: [0, 0, 0] },
+                styles: { fontSize: 9 }
+            });
+
+            // Summary Footer
+            const finalY = doc.lastAutoTable.finalY || 70;
+            const avgQps = (trafficChart.data.datasets[0].data.reduce((a, b) => a + b, 0) / tableData.length).toFixed(2);
+            const totalQ = trafficChart.data.datasets[1].data.reduce((a, b) => a + b, 0);
+            
+            doc.setFont("helvetica", "bold");
+            doc.text("Summary:", 20, finalY + 15);
+            doc.setFont("helvetica", "normal");
+            doc.text(`- Period Average QPS: ${avgQps}`, 25, finalY + 22);
+            doc.text(`- Cumulative Queries in Period: ${totalQ}`, 25, finalY + 29);
+
+            doc.save(`DNS_Traffic_Report_${currentTrafficRange}_${new Date().toISOString().slice(0,10)}.pdf`);
+        }
+
+        async function fetchSyncInfo() {
+            try {
+                const res = await fetch('/api/sync/info');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    document.getElementById('sync-token-text').innerText = data.sync_token;
+                    window.primaryIP = data.primary_ip;
+                    window.syncToken = data.sync_token;
+                    
+                    // Update Role UI
+                    updateRoleUI(data.role, data.last_sync, data.secondary_ip);
+                }
+            } catch (e) { console.error(e); }
+        }
+
+        function updateRoleUI(role, lastSync, secondaryIp) {
+            const badge = document.getElementById('node-role-badge');
+            const headerBadge = document.getElementById('header-node-role');
+            const btnPrimary = document.getElementById('btn-role-primary');
+            const btnSecondary = document.getElementById('btn-role-secondary');
+            const syncInfo = document.getElementById('sync-status-info');
+            const syncTime = document.getElementById('last-sync-time');
+            const remoteIp = document.getElementById('remote-node-ip');
+            
+            badge.innerText = role;
+            headerBadge.innerText = role;
+            
+            if (role === 'PRIMARY') {
+                headerBadge.className = "ml-2 text-white bg-blue-600 px-2 py-0.5 rounded text-[8px]";
+                badge.className = "px-2 py-0.5 rounded text-[9px] font-orbitron bg-blue-500/20 text-blue-400 border border-blue-500/30";
+                btnPrimary.className = "py-2 rounded-lg text-[9px] font-orbitron border border-blue-500 bg-blue-600 text-white transition shadow-lg shadow-blue-900/20";
+                btnSecondary.className = "py-2 rounded-lg text-[9px] font-orbitron border border-white/5 bg-slate-800 text-slate-400 hover:bg-slate-700 transition";
+                
+                syncInfo.classList.remove('hidden');
+                syncTime.innerText = lastSync || 'NEVER';
+                remoteIp.innerText = secondaryIp || 'NONE';
+            } else {
+                headerBadge.className = "ml-2 text-white bg-orange-600 px-2 py-0.5 rounded text-[8px]";
+                badge.className = "px-2 py-0.5 rounded text-[9px] font-orbitron bg-orange-500/20 text-orange-400 border border-orange-500/30";
+                btnSecondary.className = "py-2 rounded-lg text-[9px] font-orbitron border border-orange-500 bg-orange-600 text-white transition shadow-lg shadow-orange-900/20";
+                btnPrimary.className = "py-2 rounded-lg text-[9px] font-orbitron border border-white/5 bg-slate-800 text-slate-400 hover:bg-slate-700 transition";
+                
+                syncInfo.classList.add('hidden');
+            }
+        }
+
+        async function switchRole(role) {
+            if (!confirm(`SWITCH SYSTEM TO ${role} MODE?`)) return;
+            try {
+                const res = await fetch('/api/system/role', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({role})
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    fetchSyncInfo();
+                }
+            } catch (e) { alert('Failed to switch role'); }
+        }
+
+        function showSyncInstructions() {
+            const primaryIp = window.primaryIP || location.hostname;
+            const syncToken = window.syncToken || 'YOUR_TOKEN';
+            
+            document.getElementById('cmd-copy').innerText = `scp user@${primaryIp}:/home/dns/setup_secondary.sh .`;
+            document.getElementById('cmd-install').innerText = `sudo bash setup_secondary.sh ${primaryIp} ${syncToken}`;
+            
+            document.getElementById('secondary-setup-modal').classList.remove('hidden');
+        }
+
+        function closeSecondaryModal() {
+            document.getElementById('secondary-setup-modal').classList.add('hidden');
+        }
+
+        function copyText(id) {
+            const text = document.getElementById(id).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = event.target;
+                const originalText = btn.innerText;
+                btn.innerText = 'COPIED!';
+                btn.classList.add('text-green-400');
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                    btn.classList.remove('text-green-400');
+                }, 2000);
+            });
+        }
+
+        function copyToClipboard(elementId) {
+            const text = document.getElementById(elementId).innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Copied to clipboard!');
+            });
+        }
+
+        async function updateMetrics() {
+            // Check auth first
+            try {
+                const authRes = await fetch('/api/check_auth');
+                const authData = await authRes.json();
+                if (!authData.authenticated) {
+                    document.getElementById('login-modal').classList.remove('hidden');
+                    return; 
+                } else {
+                    document.getElementById('login-modal').classList.add('hidden');
+                }
+            } catch (e) {
+                console.error("Auth check failed", e);
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/status');
+                if (res.status === 401) {
+                    document.getElementById('login-modal').classList.remove('hidden');
+                    return;
+                }
+                const data = await res.json();
+                updateElementStatus('dnsmasq', data.dnsmasq);
+                updateElementStatus('unbound', data.unbound);
+                updateElementStatus('dnssec', data.dnssec);
+                updateElementStatus('guardian', data.guardian);
+                updateElementStatus('security', data.security.flood_protection && data.security.connection_limit);
+                updateElementStatus('iptables', data.iptables);
+
+                // Update Guardian Logs if available
+                if (data.security?.guardian_logs && data.security.guardian_logs.length > 0) {
+                    const logs = data.security.guardian_logs.join('');
+                    document.getElementById('guardian-logs').innerText = logs;
+                    document.getElementById('guardian-logs-container').classList.remove('hidden');
+                } else {
+                    const container = document.getElementById('guardian-logs-container');
+                    if (container) container.classList.add('hidden');
+                }
+
+                updateMetricValue('cpu', data.metrics.cpu);
+                updateMetricValue('ram', data.metrics.ram);
+                updateMetricValue('hdd', data.metrics.hdd);
+                updateMetricValue('perf', data.metrics.dns_perf);
+
+                // Pre-fill Network Form if empty
+                if (!document.getElementById('ip4-addr-input').value) {
+                    document.getElementById('ip4-addr-input').value = data.network?.ip4 || '';
+                    document.getElementById('ip4-gw-input').value = data.network?.ip4_gw || '';
+                    document.getElementById('ip6-addr-input').value = data.network?.ip6 || '';
+                    document.getElementById('ip6-gw-input').value = data.network?.ip6_gw || '';
+                    document.getElementById('ipv6-toggle').checked = data.network?.ipv6_enabled || false;
+                    
+                    // Pre-fill DNS Trust
+                    document.getElementById('trust-ip-input').value = data.trust?.ip || '';
+                    document.getElementById('trust-toggle').checked = data.trust?.enabled || false;
+                }
+
+                // Pre-fill Whitelist if empty
+                if (!document.getElementById('whitelist-input').value && data.security?.whitelist) {
+                    document.getElementById('whitelist-input').value = data.security.whitelist.join('\n');
+                }
+                
+                // Fetch logs and traffic if first run
+                if (!window.firstRunDone) {
+                    fetchLogs();
+                    updateTraffic();
+                    updateCombinedTraffic();
+                    window.firstRunDone = true;
+                }
+            } catch (e) { console.error(e); }
+            
+            // Schedule next update
+            setTimeout(updateMetrics, 5000);
+        }
+
+        async function updateTraffic() {
+            if (currentTrafficRange !== 'live') return;
+            try {
+                const res = await fetch('/api/traffic');
+                if (res.status === 401) return;
+                const data = await res.json();
+                
+                // Smooth transition: only update chart if data actually changed
+                const newLabels = data.map(d => d.time);
+                const newQPS = data.map(d => d.qps);
+                const newQueries = data.map(d => d.queries);
+                
+                // Check if data has changed meaningfully
+                const dataChanged = 
+                    trafficChart.data.labels.length !== newLabels.length ||
+                    newQPS.some((v, i) => Math.abs(v - (trafficChart.data.datasets[0].data[i] || 0)) > 10) ||
+                    newQueries.some((v, i) => Math.abs(v - (trafficChart.data.datasets[1].data[i] || 0)) > 100);
+                
+                if (dataChanged) {
+                    trafficChart.data.labels = newLabels;
+                    trafficChart.data.datasets[0].data = newQPS;
+                    trafficChart.data.datasets[1].data = newQueries;
+                    trafficChart.update('active');
+                }
+            } catch (e) { console.error(e); }
+            
+            setTimeout(updateTraffic, 3000);
+        }
+
+        async function updateCombinedTraffic() {
+            try {
+                const [resServfail, resBlocklist] = await Promise.all([
+                    fetch('/api/traffic/servfail'),
+                    fetch('/api/traffic/blocklist')
+                ]);
+
+                if (resServfail.status === 401 || resBlocklist.status === 401) return;
+
+                const servfailData = await resServfail.json();
+                const blocklistData = await resBlocklist.json();
+
+                // Process data to merge domains
+                const servfailDomains = servfailData.top_domains || [];
+                const blocklistDomains = blocklistData.top_domains || [];
+                
+                // Create a map of all unique domains
+                const domainMap = new Map();
+                
+                servfailDomains.forEach(d => {
+                    if (!domainMap.has(d.domain)) {
+                        domainMap.set(d.domain, { servfail: 0, blocked: 0 });
+                    }
+                    domainMap.get(d.domain).servfail = d.errors;
+                });
+                
+                blocklistDomains.forEach(d => {
+                    if (!domainMap.has(d.domain)) {
+                        domainMap.set(d.domain, { servfail: 0, blocked: 0 });
+                    }
+                    domainMap.get(d.domain).blocked = d.blocked;
+                });
+                
+                // Convert map to array and sort by total activity
+                const mergedData = Array.from(domainMap.entries()).map(([domain, counts]) => ({
+                    domain,
+                    servfail: counts.servfail,
+                    blocked: counts.blocked,
+                    total: counts.servfail + counts.blocked
+                })).sort((a, b) => b.total - a.total).slice(0, 10); // Top 10 combined
+
+                const labels = mergedData.map(d => d.domain);
+                const servfailCounts = mergedData.map(d => d.servfail);
+                const blockedCounts = mergedData.map(d => d.blocked);
+
+                combinedTrafficChart.data.labels = labels;
+                combinedTrafficChart.data.datasets[0].data = servfailCounts;
+                combinedTrafficChart.data.datasets[1].data = blockedCounts;
+                combinedTrafficChart.update('active');
+                
+                const totalServfail = servfailData.summary.total_servfail_errors;
+                const totalBlocked = blocklistData.summary.total_blocked;
+                document.getElementById('combined-count').innerText = 
+                    `${totalServfail} errors / ${totalBlocked} blocked`;
+
+            } catch (e) { console.error(e); }
+            
+            setTimeout(updateCombinedTraffic, 5000);
+        }
+
+        function toggleFullscreen(elemId) {
+            const elem = document.getElementById(elemId);
+            if (!document.fullscreenElement) {
+                if (elem.requestFullscreen) {
+                    elem.requestFullscreen();
+                } else if (elem.webkitRequestFullscreen) { /* Safari */
+                    elem.webkitRequestFullscreen();
+                } else if (elem.msRequestFullscreen) { /* IE11 */
+                    elem.msRequestFullscreen();
+                }
+                elem.classList.add('fullscreen-mode');
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) { /* Safari */
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) { /* IE11 */
+                    document.msExitFullscreen();
+                }
+            }
+        }
+
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+        document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+        document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+        function handleFullscreenChange() {
+            const elem = document.getElementById('traffic-container');
+            if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
+                elem.classList.remove('fullscreen-mode');
+            } else {
+                elem.classList.add('fullscreen-mode');
+            }
+            if (trafficChart) {
+                trafficChart.resize();
+            }
+        }
+
+        function updateMetricValue(id, val) {
+            document.getElementById('metric-' + id).innerText = val;
+            document.getElementById('bar-' + id).style.width = val + '%';
+        }
+
+        function updateElementStatus(id, isActive) {
+            const el = document.getElementById('status-' + id);
+            if (!el) return;
+            el.innerText = isActive ? 'ACTIVE' : 'OFFLINE';
+            el.className = 'text-[10px] font-orbitron ' + (isActive ? 'status-on' : 'status-off');
+        }
+
+        async function runDig() {
+            const domain = document.getElementById('domain-input').value;
+            const qtype = document.getElementById('qtype-input').value;
+            if (!domain) return;
+            const btn = document.getElementById('dig-btn');
+            const modal = document.getElementById('dig-modal');
+            const resultDisplay = document.getElementById('dig-modal-result');
+            const subtitle = document.getElementById('dig-modal-subtitle');
+            
+            btn.disabled = true; 
+            btn.innerText = 'QUERYING...';
+            
+            try {
+                const res = await fetch('/api/dig', { 
+                    method: 'POST', 
+                    headers: {'Content-Type': 'application/json'}, 
+                    body: JSON.stringify({domain, qtype}) 
+                });
+                
+                const data = await res.json();
+                modal.classList.remove('hidden');
+                
+                if (res.ok) {
+                    resultDisplay.innerText = data.result;
+                    resultDisplay.classList.remove('text-red-400');
+                    subtitle.innerText = 'DEEP INSPECTION SUCCESS: ' + domain.toUpperCase();
+                    subtitle.classList.remove('text-red-400');
+                    subtitle.classList.add('text-blue-400');
+                } else {
+                    resultDisplay.innerText = 'ERROR: ' + (data.message || 'Query failed');
+                    resultDisplay.classList.add('text-red-400');
+                    subtitle.innerText = 'INSPECTION FAILED';
+                    subtitle.classList.remove('text-blue-400');
+                    subtitle.classList.add('text-red-400');
+                }
+            } catch (e) { 
+                modal.classList.remove('hidden');
+                resultDisplay.innerText = 'CONNECTION ERROR';
+                resultDisplay.classList.add('text-red-400');
+                subtitle.innerText = 'NETWORK ERROR';
+                subtitle.classList.add('text-red-400');
+            } finally { 
+                btn.disabled = false; 
+                btn.innerText = 'EXECUTE QUERY'; 
+            }
+        }
+
+        function closeDigModal() {
+            document.getElementById('dig-modal').classList.add('hidden');
+        }
+
+        async function changeDnsIp() {
+            const dns_ip = document.getElementById('dns-ip-input').value;
+            if (!dns_ip) return;
+            if (!confirm('CHANGE UPSTREAM DNS TO: ' + dns_ip + '?')) return;
+            try { 
+                await fetch('/api/action', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'change_dns', dns_ip}) }); 
+                alert('Upstream DNS Updated');
+            } catch (e) { alert('Failed to update DNS'); }
+        }
+
+        async function toggleIpv6() {
+            const enabled = document.getElementById('ipv6-toggle').checked;
+            try {
+                const response = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'toggle_ipv6', enabled })
+                });
+                const result = await response.json();
+                alert('IPv6 ' + (enabled ? 'Enabled' : 'Disabled'));
+                updateMetrics();
+            } catch (e) {
+                alert('Failed to toggle IPv6');
+            }
+        }
+
+        async function openTrustScheduleModal() {
+            try {
+                const res = await fetch('/api/trust/schedule');
+                const data = await res.json();
+                document.getElementById('sched-enabled').checked = data.enabled;
+                document.getElementById('sched-start').value = data.start_time;
+                document.getElementById('sched-end').value = data.end_time;
+                document.getElementById('sched-ips').value = data.trust_ips;
+                document.getElementById('trust-schedule-modal').classList.remove('hidden');
+            } catch (e) {
+                alert('Failed to load schedule');
+            }
+        }
+
+        function closeTrustScheduleModal() {
+            document.getElementById('trust-schedule-modal').classList.add('hidden');
+        }
+
+        async function saveTrustSchedule() {
+            const enabled = document.getElementById('sched-enabled').checked;
+            const start_time = document.getElementById('sched-start').value;
+            const end_time = document.getElementById('sched-end').value;
+            const trust_ips = document.getElementById('sched-ips').value;
+
+            if (!start_time || !end_time || !trust_ips) {
+                alert('Please fill all fields');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/trust/schedule', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ enabled, start_time, end_time, trust_ips })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert('Schedule saved successfully. Guardian will apply it automatically.');
+                    closeTrustScheduleModal();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (e) {
+                alert('Failed to save schedule');
+            }
+        }
+
+        async function toggleTrust() {
+            const trust_enabled = document.getElementById('trust-toggle').checked;
+            // No IP input needed for local filtering
+            
+            try {
+                const response = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'toggle_trust', trust_enabled })
+                });
+                const result = await response.json();
+                alert('Internet Positif (Local) ' + (trust_enabled ? 'ENABLED' : 'DISABLED'));
+                updateMetrics();
+            } catch (e) {
+                alert('Failed to update Internet Positif settings');
+            }
+        }
+
+        async function updateNetwork() {
+            const ip4_addr = document.getElementById('ip4-addr-input').value;
+            const ip4_gw = document.getElementById('ip4-gw-input').value;
+            const ip6_addr = document.getElementById('ip6-addr-input').value;
+            const ip6_gw = document.getElementById('ip6-gw-input').value;
+            const ipv6_enabled = document.getElementById('ipv6-toggle').checked;
+
+            if (!ip4_addr || !ip4_gw) {
+                alert('IPv4 Address and Gateway are required!');
+                return;
+            }
+
+            if (!confirm('WARNING: Changing network settings may disconnect the server. Proceed?')) return;
+
+            const btn = event.target;
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = 'APPLYING CHANGES...';
+
+            try {
+                const response = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: 'update_network',
+                        ip4_addr,
+                        ip4_gw,
+                        ip6_addr,
+                        ip6_gw,
+                        ipv6_enabled
+                    })
+                });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    alert('Network settings updated successfully.');
+                    // Force refresh network info
+                    document.getElementById('ip4-addr-input').value = ''; 
+                    updateMetrics();
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (e) {
+                alert('Failed to update network settings: ' + e);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
+        }
+
+        async function updateWhitelist() {
+            const whitelist = document.getElementById('whitelist-input').value;
+            if (!confirm('CONFIRM GLOBAL WHITELIST UPDATE?')) return;
+            try {
+                const response = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'update_whitelist', whitelist })
+                });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    alert('Whitelist updated and firewall applied.');
+                    updateMetrics();
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (e) {
+                alert('Failed to update whitelist');
+            }
+        }
+
+        async function doAction(type) {
+            if (!confirm('CONFIRM SYSTEM COMMAND: ' + type.toUpperCase() + '?')) return;
+            try { await fetch('/api/action', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type}) }); updateMetrics(); alert('Command Executed'); } catch (e) { alert('Command failed'); }
+        }
+
+        async function doActionWithDomain(type) {
+            const domain = document.getElementById('domain-input').value;
+            if (!domain) { alert('Please enter a domain first'); return; }
+            if (!confirm('CONFIRM ' + type.toUpperCase() + ' FOR: ' + domain + '?')) return;
+            try { await fetch('/api/action', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type, domain}) }); alert(type.toUpperCase() + ' Applied'); } catch (e) { alert('Action failed'); }
+        }
+
+        async function fetchLogs() {
+            try { const res = await fetch('/api/logs'); const data = await res.json(); document.getElementById('logs-content').innerText = data.logs || 'No recent logs'; } catch (e) { }
+        }
+
+        async function fetchBannedIps() {
+            const listEl = document.getElementById('banned-ips-list');
+            try {
+                const res = await fetch('/api/banned_ips');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    if (data.ips.length === 0) {
+                        listEl.innerHTML = '<p class="text-[10px] text-slate-500 text-center py-2">No blocked IPs</p>';
+                    } else {
+                        listEl.innerHTML = data.ips.map(ip => `
+                            <div class="flex justify-between items-center bg-white/5 border border-white/5 rounded-lg px-3 py-2 hover:bg-white/10 transition">
+                                <span class="text-[10px] text-slate-300 font-mono">${ip}</span>
+                                <button onclick="unblockIp('${ip}')" class="text-slate-500 hover:text-green-400 transition" title="Unblock IP">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                                    </svg>
+                                </button>
+                            </div>
+                        `).join('');
+                    }
+                }
+            } catch (e) { console.error('Failed to fetch banned IPs', e); }
+        }
+
+        async function unblockIp(ip) {
+            if (!confirm('Unblock IP ' + ip + '?')) return;
+            try {
+                const res = await fetch('/api/unblock_ip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert('IP ' + ip + ' unblocked successfully');
+                    fetchBannedIps();
+                } else {
+                    alert('Failed to unblock: ' + data.message);
+                }
+            } catch (e) { alert('Connection error'); }
+        }
+
+        // --- DOMAIN LIST MODAL FUNCTIONS ---
+        async function openListModal(type) {
+            const modal = document.getElementById('list-modal');
+            const title = document.getElementById('list-modal-title');
+            const subtitle = document.getElementById('list-modal-subtitle');
+            const content = document.getElementById('list-modal-content');
+
+            title.innerText = type.toUpperCase() + ' LIST';
+            subtitle.innerText = 'MANAGE SYSTEM ' + type.toUpperCase();
+            content.innerHTML = '<p class="text-[10px] text-slate-500 text-center py-4 animate-pulse font-orbitron">FETCHING DATABASE...</p>';
+            modal.classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/list/${type}`);
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    if (data.domains.length === 0) {
+                        content.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">No entries found in this list.</p>';
+                    } else {
+                        content.innerHTML = data.domains.map(domain => `
+                            <div class="flex justify-between items-center bg-white/5 border border-white/5 rounded-xl px-4 py-3 hover:bg-white/10 transition group">
+                                <span class="text-xs font-mono text-white">${domain}</span>
+                                <button onclick="removeDomainFromList('${type}', '${domain}')" class="text-red-500/50 hover:text-red-500 transition-all p-2 hover:scale-110">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                            </div>
+                        `).join('');
+                    }
+                } else {
+                    content.innerHTML = `<p class="text-red-400 text-xs text-center py-8">Error: ${data.message}</p>`;
+                }
+            } catch (e) {
+                content.innerHTML = '<p class="text-red-400 text-xs text-center py-8">Connection failed.</p>';
+            }
+        }
+
+        function closeListModal() {
+            document.getElementById('list-modal').classList.add('hidden');
+        }
+
+        async function removeDomainFromList(type, domain) {
+            if (!confirm(`REMOVE ${domain} FROM ${type.toUpperCase()}?`)) return;
+            
+            try {
+                const res = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: type, // 'blacklist' or 'whitelist'
+                        action: 'remove',
+                        domain: domain
+                    })
+                });
+                
+                const result = await res.json();
+                if (result.status === 'success') {
+                    // Refresh the list
+                    openListModal(type);
+                } else {
+                    alert('Failed: ' + result.message);
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+        }
+
+        // Initialize
+        updateMetrics();
+        fetchBannedIps();
+        fetchSyncInfo();
+        setInterval(fetchBannedIps, 10000);
+    </script>
+</body>
+</html>

@@ -1,3 +1,0 @@
-{
-  "range-cache-vscode-remote://ssh-remote%2B7b22686f73744e616d65223a223130332e36382e3231332e3734227d/home/dns/dnsmasq_smartdns.conf": "[{\"originRange\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":5,\"character\":15}},\"modifyRange\":{\"start\":{\"line\":2,\"character\":0},\"end\":{\"line\":5,\"character\":15}},\"action\":\"None\",\"isLine\":false,\"originText\":\"Listen on local interface and all available IPs\\\\ninterface=lo\\\\ninterface=ens18\\\\nbind-interfaces\",\"originAcceptText\":\"Listen on local interface and all available IPs\\ninterface=lo\\ninterface=ens18\\nbind-interfaces\",\"originTextLength\":92,\"aiScene\":\"builder\",\"behaviorType\":\"accept\",\"updateTime\":1770473391879}]"
-}

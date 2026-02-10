@@ -1,28 +1,31 @@
-# Logs
-*.log
-/var/log/
-
-# Trae
+# System files
 .trae-server/
-.trae/
+.antigravity-server/
+.vscode-server/
+.vscode/
+.cache/
+.Xauthority
+.wget-hsts
+.bash_history
+.lesshst
+.sudo_as_admin_successful
+.dotnet/
 
-# Databases
+# Logs and DBs
+*.log
+*.log.*
+traffic_history.db
+traffic_history.db.bak
+web_gui/.password.hash
 *.db
-*.sqlite3
-*.hash
+*.sqlite
 
-# Python
+# Temp files
 __pycache__/
-*.py[cod]
-*$py.class
-venv/
-.env
-
-# System/Config sensitive (optional, be careful)
-# .bash_history
-# .ssh/
-
-# Temporary files
-*.tmp
-*.swp
+*.pyc
+*.pyo
+*.pyd
 .DS_Store
+Thumbs.db
+backups/
+temp_*.conf

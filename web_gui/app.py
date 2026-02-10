@@ -8,6 +8,7 @@ import time
 import hashlib
 import sqlite3
 import threading
+import json
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -226,12 +227,12 @@ def before_request():
     #     return jsonify({'status': 'error', 'message': 'Access Denied: Your IP is not whitelisted'}), 403
     pass
     
-    # Exclude API endpoints that use JSON/POST from WAF body check
+    # Exclude API endpoints from WAF check (prevent false positives blocking Web GUI)
     if request.path.startswith('/api/'):
-        # Allow common API paths
-        if request.path in ['/api/login', '/api/change_password', '/api/action', '/api/dig', 
-                           '/api/trust/schedule', '/api/system/role', '/api/unblock_ip']:
-            return
+        # Allow all API paths - WAF patterns can block valid JSON/query params
+        return
+    if request.path.startswith('/static/') or request.path == '/favicon.ico' or request.path == '/health':
+        return
 
     if waf_check():
         print(f"WAF BLOCK: Path={request.path}, Body={request.get_data().decode('utf-8', errors='ignore')}")
@@ -249,9 +250,10 @@ def get_traffic_stats():
         total_queries = 0
         window_size = 5
         
-        # Increase tail for ISP scale (20k lines handles up to 4000 QPS over 5s)
-        cmd = "sudo tail -n 20000 /var/log/dnsmasq.log | grep 'query\\['"
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip()
+        # Increase tail for ISP scale (200k lines handles up to 40k QPS over 5s)
+        # Assuming avg 20k QPS * 5s = 100k lines. Using 200k for safety margin.
+        cmd = "sudo tail -n 200000 /var/log/dnsmasq.log | grep 'query\\['"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
             return 0, 0
@@ -282,6 +284,268 @@ def get_traffic_stats():
     except Exception as e:
         print(f"Error in get_traffic_stats: {e}")
         return 0, 0
+
+def get_per_ip_traffic_stats(limit=20):
+    """
+    Get top IPs by query count in last 5 minutes
+    Returns: {ip: queries, rate_limit_status}
+    """
+    try:
+        cmd = f"sudo tail -n 50000 /var/log/dnsmasq.log | grep 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        
+        if not result:
+            return []
+        
+        per_ip_data = []
+        for line in result.split('\n'):
+            try:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    count = int(parts[0])
+                    ip = parts[1]
+                    
+                    # Check if IP is rate-limited (very high query spike)
+                    rate_limit_status = "normal"
+                    if count > 10000:  # More than 10000 queries in 5 min window = ~2000 QPS
+                        rate_limit_status = "high"
+                    elif count > 5000:  # More than 5000 = ~1000 QPS
+                        rate_limit_status = "elevated"
+                    
+                    per_ip_data.append({
+                        'ip': ip,
+                        'queries': count,
+                        'qps': round(count / 5, 1),  # Rough QPS estimate
+                        'status': rate_limit_status
+                    })
+            except:
+                continue
+        
+        return per_ip_data
+    except Exception as e:
+        print(f"Error in get_per_ip_traffic_stats: {e}")
+        return []
+
+def get_servfail_stats(limit=5):
+    """
+    Get SERVFAIL error statistics from dnsmasq logs
+    Returns: [{'domain': domain, 'errors': count, 'percentage': pct}, ...]
+    """
+    try:
+        # Get total queries in recent logs
+        cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
+        total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        total_queries = int(total_result) if total_result else 1
+        
+        # Get SERVFAIL errors by domain
+        cmd = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep 'reply is SERVFAIL' | awk '{{print $8}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        
+        if not result:
+            return []
+        
+        servfail_data = []
+        for line in result.split('\n'):
+            try:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    count = int(parts[0])
+                    domain = parts[1]
+                    percentage = round((count / total_queries) * 100, 2) if total_queries > 0 else 0
+                    
+                    servfail_data.append({
+                        'domain': domain,
+                        'errors': count,
+                        'percentage': percentage
+                    })
+            except:
+                continue
+        
+        return servfail_data
+    except Exception as e:
+        print(f"Error in get_servfail_stats: {e}")
+        return []
+
+def get_blocklist_stats(limit=10):
+    """
+    Get blocklist hits from dnsmasq logs
+    Tracks domains blocked by blacklist configuration
+    Returns: [{'domain': domain, 'blocked': count, 'percentage': pct}, ...]
+    """
+    try:
+        # Get total queries
+        cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
+        total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        total_queries = int(total_result) if total_result else 1
+        
+        # Find blocked domains (queries that were denied/replied with NXDOMAIN or 0.0.0.0)
+        # dnsmasq marks blocked queries with specific patterns in logs
+        cmd = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -E 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        
+        if not result:
+            return []
+        
+        # Additional check for blocked entries (0.0.0.0 or 127.0.0.1 responses)
+        cmd_blocked = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -E 'reply from |addresses' | grep -E '0\\.0\\.0\\.0|127\\.0\\.0\\.1' | awk '{{print $8}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        blocked_result = subprocess.run(cmd_blocked, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        
+        blocklist_data = []
+        
+        if blocked_result:
+            for line in blocked_result.split('\n'):
+                try:
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        count = int(parts[0])
+                        domain = parts[1]
+                        percentage = round((count / total_queries) * 100, 2) if total_queries > 0 else 0
+                        
+                        blocklist_data.append({
+                            'domain': domain,
+                            'blocked': count,
+                            'percentage': percentage
+                        })
+                except:
+                    continue
+        
+        return blocklist_data[:limit]
+    except Exception as e:
+        print(f"Error in get_blocklist_stats: {e}")
+        return []
+
+# --- DNS SETTINGS MANAGEMENT ---
+
+def read_dnsmasq_setting(key):
+    """Read a setting from dnsmasq config files"""
+    try:
+        for config_file in ['/etc/dnsmasq.d/00-base.conf', '/etc/dnsmasq.conf']:
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    for line in f:
+                        if line.strip().startswith(key + '='):
+                            value = line.split('=', 1)[1].strip()
+                            return value
+    except:
+        pass
+    return None
+
+def read_unbound_setting(key):
+    """Read a setting from unbound config files"""
+    try:
+        for config_file in ['/etc/unbound/unbound.conf.d/smartdns.conf']:
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    for line in f:
+                        if key + ':' in line and not line.strip().startswith('#'):
+                            parts = line.split(':', 1)
+                            if len(parts) > 1:
+                                value = parts[1].strip()
+                                return value
+    except:
+        pass
+    return None
+
+def get_dns_settings():
+    """Get current DNS performance settings"""
+    return {
+        'dnsmasq': {
+            'cache_size': read_dnsmasq_setting('cache-size') or '100000',
+            'dns_forward_max': read_dnsmasq_setting('dns-forward-max') or '10000',
+            'min_cache_ttl': read_dnsmasq_setting('min-cache-ttl') or '300',
+            'max_cache_ttl': read_dnsmasq_setting('max-cache-ttl') or '86400',
+        },
+        'unbound': {
+            'num_threads': read_unbound_setting('num-threads') or '8',
+            'ratelimit': read_unbound_setting('ratelimit') or '50000',
+            'ip_ratelimit': read_unbound_setting('ip-ratelimit') or '2000',
+            'msg_cache_size': read_unbound_setting('msg-cache-size') or '100m',
+            'rrset_cache_size': read_unbound_setting('rrset-cache-size') or '100m',
+        },
+        'limits': {
+            'qps_alert_threshold': '200',  # Alert when > 200 QPS
+            'max_allowed_qps': '2000',
+            'cache_hit_target': '70',  # Target 70% cache hit rate
+        }
+    }
+
+def update_dnsmasq_setting(key, value):
+    """Update dnsmasq setting in config file"""
+    try:
+        config_file = '/etc/dnsmasq.d/00-base.conf'
+        if not os.path.exists(config_file):
+            return False
+        
+        with open(config_file, 'r') as f:
+            lines = f.readlines()
+        
+        updated = False
+        for i, line in enumerate(lines):
+            if line.strip().startswith(key + '='):
+                lines[i] = f"{key}={value}\n"
+                updated = True
+                break
+        
+        if not updated:
+            lines.append(f"{key}={value}\n")
+        
+        with open(config_file, 'w') as f:
+            f.writelines(lines)
+        
+        return True
+    except Exception as e:
+        print(f"Error updating dnsmasq setting: {e}")
+        return False
+
+def update_unbound_setting(key, value):
+    """Update unbound setting in config file"""
+    try:
+        config_file = '/etc/unbound/unbound.conf.d/smartdns.conf'
+        if not os.path.exists(config_file):
+            return False
+        
+        with open(config_file, 'r') as f:
+            lines = f.readlines()
+        
+        updated = False
+        for i, line in enumerate(lines):
+            if key + ':' in line and not line.strip().startswith('#'):
+                indent = len(line) - len(line.lstrip())
+                lines[i] = f"{' ' * indent}{key}: {value}\n"
+                updated = True
+                break
+        
+        if not updated:
+            lines.append(f"    {key}: {value}\n")
+        
+        with open(config_file, 'w') as f:
+            f.writelines(lines)
+        
+        return True
+    except Exception as e:
+        print(f"Error updating unbound setting: {e}")
+        return False
+
+def restart_dns_services():
+    """Restart dnsmasq and unbound services"""
+    try:
+        # Test configs first
+        test_dnsmasq = subprocess.run(['sudo', 'dnsmasq', '--test'], capture_output=True, text=True)
+        if test_dnsmasq.returncode != 0:
+            return {'status': 'error', 'message': 'Invalid dnsmasq config', 'detail': test_dnsmasq.stderr}
+        
+        test_unbound = subprocess.run(['unbound-checkconf'], capture_output=True, text=True)
+        if test_unbound.returncode != 0:
+            return {'status': 'error', 'message': 'Invalid unbound config', 'detail': test_unbound.stderr}
+        
+        # Restart services
+        subprocess.run(['sudo', 'systemctl', 'restart', 'dnsmasq'], timeout=10)
+        subprocess.run(['sudo', 'systemctl', 'restart', 'unbound'], timeout=10)
+        
+        time.sleep(2)
+        return {'status': 'success', 'message': 'Services restarted successfully'}
+    except Exception as e:
+        return {'status': 'error', 'message': f'Error restarting services: {e}'}
 
 # --- TRAFFIC HISTORY DB ---
 DB_PATH = '/home/dns/traffic_history.db'
@@ -397,6 +661,73 @@ def traffic():
         
     return jsonify(traffic_data)
 
+@app.route('/api/traffic/per-ip')
+def traffic_per_ip():
+    """Get per-IP traffic analysis for high-performance monitoring"""
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    limit = request.args.get('limit', 20, type=int)
+    per_ip_data = get_per_ip_traffic_stats(limit=limit)
+    
+    return jsonify({
+        'timestamp': datetime.now().isoformat(),
+        'overall': {
+            'qps': get_traffic_stats()[0],
+            'total_ips': len(per_ip_data)
+        },
+        'top_ips': per_ip_data,
+        'rate_limits': {
+            'global': '100000 QPS',
+            'per_ip': '20000 QPS',
+            'com_domain': '5000 QPS'
+        }
+    })
+
+@app.route('/api/traffic/servfail')
+def traffic_servfail():
+    """Get SERVFAIL error statistics"""
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    limit = request.args.get('limit', 5, type=int)
+    servfail_data = get_servfail_stats(limit=limit)
+    
+    # Calculate total SERVFAIL count
+    total_servfail = sum(item['errors'] for item in servfail_data)
+    
+    return jsonify({
+        'timestamp': datetime.now().isoformat(),
+        'summary': {
+            'total_servfail_errors': total_servfail,
+            'affected_domains': len(servfail_data),
+            'error_rate': f"{sum(item['percentage'] for item in servfail_data):.2f}%"
+        },
+        'top_domains': servfail_data
+    })
+
+@app.route('/api/traffic/blocklist')
+def traffic_blocklist():
+    """Get blocklist hits and blocked domains"""
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    limit = request.args.get('limit', 10, type=int)
+    blocklist_data = get_blocklist_stats(limit=limit)
+    
+    # Calculate total blocked count
+    total_blocked = sum(item['blocked'] for item in blocklist_data)
+    
+    return jsonify({
+        'timestamp': datetime.now().isoformat(),
+        'summary': {
+            'total_blocked': total_blocked,
+            'blocked_domains': len(blocklist_data),
+            'block_rate': f"{sum(item['percentage'] for item in blocklist_data):.2f}%"
+        },
+        'top_domains': blocklist_data
+    })
+
 def get_service_status(service_name):
     try:
         result = subprocess.run(['systemctl', 'is-active', service_name], capture_output=True, text=True)
@@ -426,6 +757,11 @@ def safe_service_restart():
     run_command("sudo systemctl restart dnsmasq")
     run_command("sudo systemctl restart unbound")
     return True, "Services restarted successfully"
+
+@app.route('/health')
+def health():
+    """Simple health check for monitoring (no auth required)"""
+    return jsonify({'status': 'ok', 'service': 'dnsmars-gui'}), 200
 
 @app.route('/')
 def index():
@@ -709,18 +1045,33 @@ def dig():
     for target in targets:
         dig_target = f"@{target}"
         cmd = f"dig {dig_target} {domain} {qtype} +short +time=1 +tries=1"
-        output = run_command(cmd).strip()
+        try:
+            proc = run_command(cmd)
+            output = (proc.stdout or '').strip()
+            full_output = (proc.stderr or '') + (proc.stdout or '')
+        except subprocess.TimeoutExpired:
+            output = "TIMEOUT"
+            full_output = "timeout"
+        except Exception as e:
+            output = ""
+            full_output = str(e)
         
         # If +short is empty, try without +short to see if there's an error
         if not output:
             full_cmd = f"dig {dig_target} {domain} {qtype} +time=1 +tries=1"
-            full_output = run_command(full_cmd).strip()
+            try:
+                proc2 = run_command(full_cmd)
+                full_output = (proc2.stdout or '') + (proc2.stderr or '')
+            except Exception:
+                full_output = ""
             if "connection timed out" in full_output.lower():
                 output = "TIMEOUT"
-            elif "communications error" in full_output.lower():
-                output = "COMM ERROR"
+            elif "communications error" in full_output.lower() or "connection refused" in full_output.lower():
+                output = "CONNECTION REFUSED"
+            elif "network is unreachable" in full_output.lower():
+                output = "NETWORK UNREACHABLE"
             else:
-                output = "NO RECORD"
+                output = "NO RECORD" if not output else output
                 
         results.append(f"[{target}] -> {output}")
         
@@ -1040,8 +1391,9 @@ def logs():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
     # Get last 20 lines of dnsmasq logs
-    result = run_command("sudo tail -n 20 /var/log/dnsmasq.log")
-    return jsonify({'logs': result})
+    proc = run_command("sudo tail -n 20 /var/log/dnsmasq.log")
+    logs = (proc.stdout or '').strip() if proc else ''
+    return jsonify({'logs': logs})
 
 @app.route('/api/banned_ips', methods=['GET'])
 def get_banned_ips():
@@ -1154,6 +1506,109 @@ def unblock_ip():
         return jsonify({'status': 'success', 'message': f'IP {ip} has been unblocked'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)})
+
+# --- GUARDIAN CONFIGURATION ---
+GUARDIAN_CONFIG_FILE = "/home/dns/guardian_config.json"
+DNSMASQ_CONFIG_FILE = "/home/dns/dnsmasq_smartdns.conf"
+
+def read_dnsmasq_config():
+    config = {}
+    if os.path.exists(DNSMASQ_CONFIG_FILE):
+        with open(DNSMASQ_CONFIG_FILE, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    parts = line.split('=', 1)
+                    config[parts[0].strip()] = parts[1].strip()
+    return config
+
+def update_dnsmasq_config(new_settings):
+    if not os.path.exists(DNSMASQ_CONFIG_FILE):
+        return
+    
+    lines = []
+    with open(DNSMASQ_CONFIG_FILE, 'r') as f:
+        lines = f.readlines()
+    
+    with open(DNSMASQ_CONFIG_FILE, 'w') as f:
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith('#') and '=' in stripped:
+                key = stripped.split('=', 1)[0].strip()
+                if key in new_settings:
+                    f.write(f"{key}={new_settings[key]}\n")
+                else:
+                    f.write(line)
+            else:
+                f.write(line)
+    
+    # Reload dnsmasq
+    subprocess.run("sudo systemctl restart dnsmasq", shell=True)
+
+@app.route('/api/guardian/config', methods=['GET'])
+def get_guardian_config():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    # Read Guardian Config
+    guardian_config = {
+        "ban_threshold": 10000,
+        "malicious_threshold": 200
+    }
+    if os.path.exists(GUARDIAN_CONFIG_FILE):
+        try:
+            with open(GUARDIAN_CONFIG_FILE, 'r') as f:
+                guardian_config.update(json.load(f))
+        except:
+            pass
+            
+    # Read DNSMasq Config
+    dnsmasq_config = read_dnsmasq_config()
+    
+    return jsonify({
+        'status': 'success',
+        'guardian': guardian_config,
+        'dnsmasq': {
+            'dns_forward_max': dnsmasq_config.get('dns-forward-max', '1500'),
+            'cache_size': dnsmasq_config.get('cache-size', '1000')
+        }
+    })
+
+@app.route('/api/guardian/config', methods=['POST'])
+def save_guardian_config():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    data = request.json
+    
+    # Save Guardian Config
+    guardian_settings = {
+        "ban_threshold": int(data.get('ban_threshold', 10000)),
+        "malicious_threshold": int(data.get('malicious_threshold', 200))
+    }
+    
+    try:
+        with open(GUARDIAN_CONFIG_FILE, 'w') as f:
+            json.dump(guardian_settings, f, indent=4)
+        # Ensure correct ownership
+        subprocess.run(['sudo', 'chown', 'dns:dns', GUARDIAN_CONFIG_FILE])
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error saving guardian config: {e}'}), 500
+        
+    # Save DNSMasq Config
+    dnsmasq_settings = {}
+    if 'dns_forward_max' in data:
+        dnsmasq_settings['dns-forward-max'] = str(data['dns_forward_max'])
+    if 'cache_size' in data:
+        dnsmasq_settings['cache-size'] = str(data['cache_size'])
+        
+    if dnsmasq_settings:
+        try:
+            update_dnsmasq_config(dnsmasq_settings)
+        except Exception as e:
+             return jsonify({'status': 'error', 'message': f'Error saving dnsmasq config: {e}'}), 500
+            
+    return jsonify({'status': 'success', 'message': 'Configuration saved and applied'})
 
 if __name__ == '__main__':
     # Use SSL context for HTTPS

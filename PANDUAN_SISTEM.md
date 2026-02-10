@@ -66,5 +66,17 @@ Sistem dikonfigurasi untuk keamanan maksimal terhadap serangan DDoS:
 - **Self-Healing:** Jika layanan `dnsmasq` atau `unbound` mati, `guardian.py` akan mendeteksi dan menghidupkannya kembali dalam hitungan detik.
 
 ---
+
+### 8. TROUBLESHOOTING WEB GUI
+Jika Web GUI tidak dapat diakses:
+
+1. **Pastikan menggunakan HTTPS (bukan HTTP):** `https://IP_SERVER:5000`
+2. **Sertifikat Self-Signed:** Browser akan menampilkan peringatan keamanan - klik "Advanced" → "Proceed" untuk melanjutkan.
+3. **Cek status layanan:** `sudo systemctl status dnsmars-gui`
+4. **Restart Web GUI:** `sudo systemctl restart dnsmars-gui`
+5. **Health Check:** Akses `https://IP_SERVER:5000/health` untuk memastikan layanan aktif.
+6. **Password default:** `admin` (segera ganti setelah login pertama)
+
+---
 *Dokumen ini diperbarui secara otomatis oleh System Assistant.*
 *© 2026 PT MARS DATA TELEKOMUNIKASI*

@@ -5,11 +5,36 @@ import re
 import sqlite3
 from datetime import datetime
 
+import json
+
 # --- CONFIGURATION ---
 LOG_FILE = "/var/log/syslog"
 DNSMASQ_LOG = "/var/log/dnsmasq.log"
-BAN_THRESHOLD = 10000  # Set very high for ISP environment (Mikrotik support)
-MALICIOUS_THRESHOLD = 200 # Increased to avoid false positives
+CONFIG_FILE = "/home/dns/guardian_config.json"
+
+# Default values
+DEFAULT_BAN_THRESHOLD = 10000
+DEFAULT_MALICIOUS_THRESHOLD = 200
+
+def load_config():
+    config = {
+        "ban_threshold": DEFAULT_BAN_THRESHOLD,
+        "malicious_threshold": DEFAULT_MALICIOUS_THRESHOLD
+    }
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                loaded = json.load(f)
+                config.update(loaded)
+        except Exception as e:
+            print(f"Error loading config: {e}")
+    return config
+
+# Load initial config
+config = load_config()
+BAN_THRESHOLD = config["ban_threshold"]
+MALICIOUS_THRESHOLD = config["malicious_threshold"]
+
 WHITELIST_FILE = "/home/dns/whitelist.conf"
 GUARDIAN_LOG = "/home/dns/guardian.log"
 BANNED_IPS_FILE = "/home/dns/banned_ips.txt"
@@ -37,10 +62,16 @@ WHITELIST, WHITELIST_SUBNETS = load_whitelist()
 LAST_WL_RELOAD = time.time()
 
 def reload_whitelist_if_needed():
-    global WHITELIST, WHITELIST_SUBNETS, LAST_WL_RELOAD
+    global WHITELIST, WHITELIST_SUBNETS, LAST_WL_RELOAD, BAN_THRESHOLD, MALICIOUS_THRESHOLD
     # Reload every 60 seconds
     if time.time() - LAST_WL_RELOAD > 60:
         WHITELIST, WHITELIST_SUBNETS = load_whitelist()
+        
+        # Reload config
+        config = load_config()
+        BAN_THRESHOLD = config["ban_threshold"]
+        MALICIOUS_THRESHOLD = config["malicious_threshold"]
+        
         LAST_WL_RELOAD = time.time()
         # Clean up banned_ips.txt if needed
         clean_banned_ips()
@@ -133,6 +164,10 @@ if LAST_IP_V4 not in WHITELIST:
 if LAST_IP_V6 and LAST_IP_V6 not in WHITELIST:
     WHITELIST.append(LAST_IP_V6)
 
+# --- SCHEDULE STATE TRACKING ---
+TRUST_CONF = "/etc/dnsmasq.d/upstream.conf"
+LAST_SCHEDULE_STATE = None  # Track last schedule state to detect changes
+
 def log_event(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     formatted_msg = f"[{timestamp}] {message}\n"
@@ -198,7 +233,6 @@ def analyze_logs():
             block_ip(ip)
 
 # --- SELF-HEALING LOGIC ---
-TRUST_CONF = "/etc/dnsmasq.d/smartdns.conf"
 MAX_LOG_SIZE = 5 * 1024 * 1024  # 5MB
 
 def rotate_logs():
@@ -214,13 +248,37 @@ def is_port_listening(port, proto="tcp", addr_part=":"):
     return res and res.stdout.strip() != ""
 
 def is_dns_trust_enabled():
+    """
+    Check if DNS Trust is enabled by examining upstream.conf.
+    DNS Trust is ENABLED if it contains ANY server address OTHER than defaults (8.8.8.8, 1.1.1.1)
+    DNS Trust is DISABLED if upstream.conf is empty, has no servers, or only has default servers
+    """
     if not os.path.exists(TRUST_CONF):
         return False
     try:
+        # Default upstream servers (used when DNS Trust is disabled)
+        default_servers = {'8.8.8.8', '1.1.1.1'}
+        found_servers = set()
+        
         with open(TRUST_CONF, 'r') as f:
             for line in f:
-                if line.strip().startswith('server='):
-                    return True
+                line = line.strip()
+                if line.startswith('server='):
+                    # Extract server IP
+                    server_ip = line.replace('server=', '').strip()
+                    if server_ip:
+                        found_servers.add(server_ip)
+        
+        # If no servers found, DNS Trust is disabled
+        if not found_servers:
+            return False
+        
+        # If only default servers found, DNS Trust is disabled
+        if found_servers == default_servers:
+            return False
+        
+        # If ANY non-default server found, DNS Trust is ENABLED
+        return len(found_servers) > 0
     except:
         pass
     return False
@@ -472,6 +530,14 @@ def detect_and_block_attacks():
 DB_PATH = "/home/dns/traffic_history.db"
 
 def apply_trust_schedule():
+    """
+    Enhanced schedule enforcement with change detection.
+    - Detects schedule setting changes and forces immediate sync
+    - Properly handles overnight schedules (e.g., 19:00-05:00)
+    - Avoids unnecessary service restarts
+    """
+    global LAST_SCHEDULE_STATE
+    
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -479,30 +545,98 @@ def apply_trust_schedule():
         row = c.fetchone()
         conn.close()
         
-        if not row or not row[0]: # Not enabled
+        if not row:
             return
-            
+        
         enabled, start_time, end_time, trust_ips = row
+        
+        # Create a hashable state representation
+        current_state = (enabled, start_time, end_time, trust_ips)
+        
+        # DETECT SCHEDULE CHANGE: Settings were modified
+        is_schedule_changed = LAST_SCHEDULE_STATE != current_state
+        if is_schedule_changed:
+            log_event(f"SCHEDULE CHANGED: ({LAST_SCHEDULE_STATE}) -> ({current_state})")
+            LAST_SCHEDULE_STATE = current_state
+        
+        # Check if schedule is enabled in database
+        if not enabled:
+            # If schedule was previously enabled, ensure DNS trust is disabled
+            current_enabled = is_dns_trust_enabled()
+            if current_enabled:
+                log_event("SCHEDULE: Disabled in config. Disabling DNS Trust...")
+                disable_trust_logic()
+            return
+        
+        # Schedule is enabled, check if current time is within range
         now = datetime.now().strftime("%H:%M")
         
-        # Simple time comparison
-        is_in_range = False
-        if start_time <= end_time:
-            is_in_range = start_time <= now <= end_time
-        else: # Over midnight
-            is_in_range = now >= start_time or now <= end_time
-            
+        # Calculate if current time is within schedule range
+        is_in_range = _check_time_in_range(start_time, end_time, now)
         current_enabled = is_dns_trust_enabled()
         
-        if is_in_range and not current_enabled:
-            log_event(f"SCHEDULE: Enabling DNS Trust ({start_time}-{end_time})")
-            enable_trust_logic(trust_ips)
-        elif not is_in_range and current_enabled:
-            log_event(f"SCHEDULE: Disabling DNS Trust (outside {start_time}-{end_time})")
-            disable_trust_logic()
-            
+        # DECISION LOGIC:
+        # 1. If schedule changed, force immediate state sync
+        # 2. If time-based change needed, apply it
+        
+        if is_schedule_changed:
+            # Force immediate sync to new state
+            if is_in_range:
+                if not current_enabled:
+                    log_event(f"SCHEDULE CHANGE: Force enabling DNS Trust ({start_time}-{end_time})")
+                    enable_trust_logic(trust_ips)
+            else:
+                if current_enabled:
+                    log_event(f"SCHEDULE CHANGE: Force disabling DNS Trust (outside {start_time}-{end_time})")
+                    disable_trust_logic()
+        else:
+            # Normal operation: only change state if needed
+            if is_in_range and not current_enabled:
+                log_event(f"SCHEDULE: Enabling DNS Trust ({start_time}-{end_time})")
+                enable_trust_logic(trust_ips)
+            elif not is_in_range and current_enabled:
+                log_event(f"SCHEDULE: Disabling DNS Trust (outside {start_time}-{end_time})")
+                disable_trust_logic()
+                
     except Exception as e:
         log_event(f"Error in trust schedule: {e}")
+
+def _check_time_in_range(start_time, end_time, now):
+    """
+    Check if current time falls within schedule range.
+    Properly handles overnight schedules (e.g., start > end).
+    
+    Args:
+        start_time: HH:MM format (e.g., "19:00")
+        end_time: HH:MM format (e.g., "05:00")
+        now: HH:MM format of current time
+    
+    Returns:
+        True if now is within range, False otherwise
+    """
+    try:
+        # Parse time strings to comparable format
+        start = start_time.replace(":", "")  # "19:00" -> "1900"
+        end = end_time.replace(":", "")      # "05:00" -> "0500"
+        current = now.replace(":", "")       # "20:30" -> "2030"
+        
+        # Convert to integers for comparison
+        start_min = int(start)
+        end_min = int(end)
+        current_min = int(current)
+        
+        if start_min <= end_min:
+            # Normal schedule: start <= end (e.g., 05:00 <= 19:00)
+            # 05:00 to 19:00 is "in range" if 500 <= now <= 1900
+            return start_min <= current_min <= end_min
+        else:
+            # Overnight schedule: start > end (e.g., 19:00 to 05:00)
+            # 19:00 to 05:00 is "in range" if (now >= 1900) OR (now <= 0500)
+            return current_min >= start_min or current_min <= end_min
+    except Exception as e:
+        log_event(f"Error in time range check: {e}")
+        return False
+
 
 def enable_trust_logic(trust_ip):
     try:

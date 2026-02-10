@@ -21,8 +21,8 @@ systemctl stop dnsmasq unbound
 
 # 3. Basic Config Sync (Initial)
 echo "Fetching initial configuration from Primary ($PRIMARY_IP)..."
-SYNC_URL="http://$PRIMARY_IP:5000/api/sync/config?token=$SYNC_TOKEN"
-RESPONSE=$(curl -s "$SYNC_URL")
+SYNC_URL="https://$PRIMARY_IP:5000/api/sync/config?token=$SYNC_TOKEN"
+RESPONSE=$(curl -sk "$SYNC_URL")
 
 if [[ $RESPONSE != *"success"* ]]; then
     echo "ERROR: Failed to connect to Primary or Invalid Token."
@@ -35,9 +35,9 @@ cat <<EOF > /home/dns_sync.sh
 #!/bin/bash
 PRIMARY_IP="$PRIMARY_IP"
 SYNC_TOKEN="$SYNC_TOKEN"
-SYNC_URL="http://\$PRIMARY_IP:5000/api/sync/config?token=\$SYNC_TOKEN"
+SYNC_URL="https://\$PRIMARY_IP:5000/api/sync/config?token=\$SYNC_TOKEN"
 
-RESPONSE=\$(curl -s "\$SYNC_URL")
+RESPONSE=\$(curl -sk "\$SYNC_URL")
 if [[ \$RESPONSE == *"success"* ]]; then
     # Extract and save configs
     echo "\$RESPONSE" | jq -r '.configs.blacklist' > /etc/dnsmasq.d/blacklist.conf

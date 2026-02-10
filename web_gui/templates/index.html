@@ -223,6 +223,55 @@
         </div>
     </div>
 
+    <!-- Guardian Settings Modal -->
+    <div id="guardian-modal" class="fixed inset-0 z-[120] flex items-center justify-center bg-black/90 backdrop-blur-md hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-lg space-y-6 border border-blue-500/30">
+            <div class="flex justify-between items-center border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-2xl font-orbitron text-white">GUARDIAN SETTINGS</h2>
+                    <p class="text-blue-400 text-[10px] tracking-widest uppercase">PERFORMANCE & SECURITY LIMITS</p>
+                </div>
+                <button onclick="closeGuardianModal()" class="text-slate-400 hover:text-white transition p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="space-y-4">
+                <!-- Guardian Config -->
+                <div class="space-y-2">
+                    <label class="text-xs font-orbitron text-slate-400">BAN THRESHOLD (Queries)</label>
+                    <input type="number" id="cfg-ban-threshold" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    <p class="text-[9px] text-slate-500">Limit query sebelum IP diblokir permanen (Default: 10000)</p>
+                </div>
+                
+                <div class="space-y-2">
+                    <label class="text-xs font-orbitron text-slate-400">MALICIOUS THRESHOLD (Queries/Min)</label>
+                    <input type="number" id="cfg-malicious-threshold" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    <p class="text-[9px] text-slate-500">Limit query per menit untuk deteksi serangan (Default: 200)</p>
+                </div>
+                
+                <!-- DNSMasq Config -->
+                <div class="space-y-2 pt-4 border-t border-white/10">
+                    <label class="text-xs font-orbitron text-slate-400">DNS FORWARD MAX (Concurrent)</label>
+                    <input type="number" id="cfg-forward-max" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    <p class="text-[9px] text-slate-500">Maksimum concurrent queries yang diteruskan (Default: 1500)</p>
+                </div>
+                
+                <div class="space-y-2">
+                    <label class="text-xs font-orbitron text-slate-400">CACHE SIZE</label>
+                    <input type="number" id="cfg-cache-size" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    <p class="text-[9px] text-slate-500">Ukuran cache DNS (Default: 1000)</p>
+                </div>
+            </div>
+
+            <div class="flex justify-end pt-4 border-t border-white/10">
+                <button onclick="saveGuardianConfig()" class="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-orbitron rounded-xl transition shadow-lg shadow-blue-900/20">SAVE CHANGES</button>
+            </div>
+        </div>
+    </div>
+
     <div class="max-w-7xl mx-auto">
         <!-- Header -->
         <header class="mb-8 flex flex-col lg:flex-row justify-between items-center gap-6">
@@ -233,7 +282,7 @@
                 <div>
                     <h1 class="text-2xl md:text-3xl font-bold font-orbitron tracking-wider text-white">PT MARS DATA TELEKOMUNIKASI</h1>
                     <div class="flex items-center gap-4 mt-1">
-                            <p class="text-blue-400 font-medium tracking-widest text-xs">DUAL STACK DNS ENGINE <span id="header-node-role" class="ml-2 text-white bg-blue-600 px-2 py-0.5 rounded text-[8px]">PRIMARY</span></p>
+                            <p class="text-blue-400 font-medium tracking-widest text-xs">DUAL STACK DNS ENGINE ft AI <span id="header-node-role" class="ml-2 text-white bg-blue-600 px-2 py-0.5 rounded text-[8px]">PRIMARY</span></p>
                             <button onclick="openPasswordModal()" class="text-[9px] text-slate-500 hover:text-purple-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">CHANGE PWD</button>
                             <button onclick="logout()" class="text-[9px] text-slate-500 hover:text-red-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">LOGOUT</button>
                         </div>
@@ -317,6 +366,9 @@
                         <button onclick="doAction('malware_shield')" class="text-left px-4 py-3 bg-red-900/20 hover:bg-red-900/40 border border-red-500/30 rounded-xl transition group">
                             <span class="block text-[10px] text-red-400 font-orbitron">PROTECTION</span><span class="text-xs font-bold text-white">MALWARE SHIELD</span>
                         </button>
+                        <button onclick="openGuardianModal()" class="text-left px-4 py-3 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-500/30 rounded-xl transition group">
+                            <span class="block text-[10px] text-blue-400 font-orbitron">CONFIGURATION</span><span class="text-xs font-bold text-white">GUARDIAN SETTINGS</span>
+                        </button>
                     </div>
                 </div>
 
@@ -385,6 +437,20 @@
                         </div>
                     </div>
                     <div class="h-[320px] chart-wrapper"><canvas id="trafficChart"></canvas></div>
+                </div>
+
+                <!-- Combined Traffic Analysis -->
+                <div id="combined-traffic-container" class="glass p-6 rounded-2xl h-[350px] transition-all duration-300">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-sm font-orbitron text-white uppercase tracking-wider">SERVFAIL & BLOCKLIST ANALYSIS</h2>
+                        <div class="flex items-center gap-2">
+                            <span id="combined-count" class="text-xs font-orbitron text-slate-300">Loading...</span>
+                            <button onclick="toggleFullscreen('combined-traffic-container')" class="text-slate-400 hover:text-white transition p-1" title="Toggle Fullscreen">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="h-[280px] chart-wrapper"><canvas id="combinedTrafficChart"></canvas></div>
                 </div>
 
                 <div class="glass p-6 rounded-2xl hidden" id="guardian-logs-container">
@@ -598,6 +664,60 @@
     </div>
 
     <script>
+        // --- GUARDIAN CONFIG FUNCTIONS ---
+        function openGuardianModal() {
+            document.getElementById('guardian-modal').classList.remove('hidden');
+            loadGuardianConfig();
+        }
+
+        function closeGuardianModal() {
+            document.getElementById('guardian-modal').classList.add('hidden');
+        }
+
+        async function loadGuardianConfig() {
+            try {
+                const res = await fetch('/api/guardian/config');
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    document.getElementById('cfg-ban-threshold').value = data.guardian.ban_threshold;
+                    document.getElementById('cfg-malicious-threshold').value = data.guardian.malicious_threshold;
+                    document.getElementById('cfg-forward-max').value = data.dnsmasq.dns_forward_max;
+                    document.getElementById('cfg-cache-size').value = data.dnsmasq.cache_size;
+                }
+            } catch (e) {
+                console.error("Error loading config:", e);
+                alert("Failed to load configuration");
+            }
+        }
+
+        async function saveGuardianConfig() {
+            const config = {
+                ban_threshold: document.getElementById('cfg-ban-threshold').value,
+                malicious_threshold: document.getElementById('cfg-malicious-threshold').value,
+                dns_forward_max: document.getElementById('cfg-forward-max').value,
+                cache_size: document.getElementById('cfg-cache-size').value
+            };
+            
+            try {
+                const res = await fetch('/api/guardian/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                
+                const result = await res.json();
+                if (result.status === 'success') {
+                    alert('Configuration saved successfully!');
+                    closeGuardianModal();
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (e) {
+                alert('Failed to save configuration: ' + e);
+            }
+        }
+
         // --- AUTH FUNCTIONS ---
         async function attemptLogin() {
             const passwordInput = document.getElementById('login-password');
@@ -621,6 +741,7 @@
                     updateMetrics();
                     setInterval(updateMetrics, 5000);
                     setInterval(updateTraffic, 3000);
+                    updateCombinedTraffic();
                 } else {
                     error.classList.remove('hidden');
                 }
@@ -686,6 +807,19 @@
         });
 
         const ctx = document.getElementById('trafficChart').getContext('2d');
+        
+        // Create gradient for QPS dataset
+        const qpsGradient = ctx.createLinearGradient(0, 0, 0, 320);
+        qpsGradient.addColorStop(0, 'rgba(255, 0, 255, 0.25)');
+        qpsGradient.addColorStop(0.5, 'rgba(255, 0, 255, 0.1)');
+        qpsGradient.addColorStop(1, 'rgba(255, 0, 255, 0.01)');
+        
+        // Create gradient for Queries dataset
+        const queryGradient = ctx.createLinearGradient(0, 0, 0, 320);
+        queryGradient.addColorStop(0, 'rgba(0, 242, 255, 0.15)');
+        queryGradient.addColorStop(0.5, 'rgba(0, 242, 255, 0.08)');
+        queryGradient.addColorStop(1, 'rgba(0, 242, 255, 0.02)');
+        
         const trafficChart = new Chart(ctx, {
             type: 'line',
             data: { 
@@ -695,32 +829,83 @@
                         label: 'QPS', 
                         data: [], 
                         borderColor: '#ff00ff', 
-                        backgroundColor: 'rgba(255, 0, 255, 0.1)', 
-                        borderWidth: 2, 
-                        pointRadius: 0, 
+                        backgroundColor: qpsGradient,
+                        borderWidth: 2.5, 
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointBorderWidth: 0,
+                        pointHitRadius: 8,
                         fill: true, 
-                        tension: 0.4,
+                        tension: 0.5,
                         yAxisID: 'y1'
                     },
                     { 
                         label: 'Snapshot Queries', 
                         data: [], 
                         borderColor: '#00f2ff', 
-                        backgroundColor: 'rgba(0, 242, 255, 0.05)', 
-                        borderWidth: 1.5, 
-                        pointRadius: 0, 
+                        backgroundColor: queryGradient,
+                        borderWidth: 2, 
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointBorderWidth: 0,
+                        pointHitRadius: 8,
                         fill: true, 
-                        tension: 0.4,
+                        tension: 0.5,
                         yAxisID: 'y'
                     }
                 ] 
             },
             options: { 
                 responsive: true, 
-                maintainAspectRatio: false, 
+                maintainAspectRatio: false,
+                animation: {
+                    duration: 300,
+                    easing: 'easeInOutQuart',
+                    resize: {
+                        duration: 0
+                    },
+                    animateRotate: true,
+                    animateScale: false
+                },
                 interaction: {
                     mode: 'index',
                     intersect: false,
+                },
+                plugins: {
+                    tooltip: {
+                        enabled: true,
+                        backgroundColor: 'rgba(5, 11, 24, 0.95)',
+                        borderColor: '#ff00ff',
+                        borderWidth: 1,
+                        titleColor: '#00f2ff',
+                        bodyColor: '#64748b',
+                        boxPadding: 8,
+                        titleFont: { size: 11, family: 'Orbitron', weight: 'bold' },
+                        bodyFont: { size: 10 },
+                        padding: 12,
+                        titleMarginBottom: 8,
+                        displayColors: true,
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) label += ': ';
+                                if (context.parsed.y !== null) {
+                                    if (context.datasetIndex === 0) {
+                                        label += context.parsed.y.toFixed(0) + ' qps';
+                                    } else {
+                                        label += context.parsed.y.toLocaleString() + ' queries';
+                                    }
+                                }
+                                return label;
+                            },
+                            afterLabel: function(context) {
+                                if (context.datasetIndex === 0 && context.parsed.y > 90000) {
+                                    return '⚠ HIGH LOAD';
+                                }
+                                return '';
+                            }
+                        }
+                    }
                 },
                 scales: { 
                     y: { 
@@ -728,20 +913,25 @@
                         display: true,
                         position: 'left',
                         beginAtZero: true, 
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' }, 
+                        grid: { 
+                            color: 'rgba(255, 255, 255, 0.06)',
+                            drawBorder: false
+                        }, 
                         ticks: { 
                             color: '#00f2ff', 
-                            font: { size: 10 },
+                            font: { size: 11, weight: '600' },
+                            padding: 8,
                             callback: function(value) {
-                                if (value >= 1000) return (value/1000).toFixed(1) + 'k';
-                                return value;
+                                if (value >= 1000000) return (value/1000000).toFixed(1) + 'M';
+                                if (value >= 1000) return (value/1000).toFixed(1) + 'K';
+                                return value.toFixed(0);
                             }
                         },
                         title: {
                             display: true,
-                            text: 'TOTAL QUERIES',
+                            text: '░ TOTAL QUERIES ░',
                             color: '#00f2ff',
-                            font: { size: 9, family: 'Orbitron' }
+                            font: { size: 10, family: 'Orbitron', weight: 'bold' }
                         }
                     }, 
                     y1: {
@@ -749,32 +939,116 @@
                         display: true,
                         position: 'right',
                         beginAtZero: true,
-                        grid: { drawOnChartArea: false }, // only want the grid lines for one axis
+                        grid: { 
+                            drawOnChartArea: false,
+                            drawBorder: false
+                        },
                         ticks: { 
                             color: '#ff00ff', 
-                            font: { size: 10 } 
+                            font: { size: 11, weight: '600' },
+                            padding: 8,
+                            callback: function(value) {
+                                if (value >= 1000) return (value/1000).toFixed(1) + 'K';
+                                return value.toFixed(0);
+                            }
                         },
                         title: {
                             display: true,
-                            text: 'QPS',
+                            text: '░ QPS ░',
                             color: '#ff00ff',
-                            font: { size: 9, family: 'Orbitron' }
+                            font: { size: 10, family: 'Orbitron', weight: 'bold' }
                         }
                     },
                     x: { 
-                        grid: { display: false }, 
-                        ticks: { color: '#64748b', font: { size: 10 } } 
+                        grid: { 
+                            display: true,
+                            color: 'rgba(255, 255, 255, 0.03)',
+                            drawBorder: false
+                        }, 
+                        ticks: { 
+                            color: '#64748b', 
+                            font: { size: 11, weight: '500' },
+                            maxRotation: 45,
+                            minRotation: 0
+                        }
                     } 
                 }, 
                 plugins: { 
                     legend: { 
                         display: true,
+                        position: 'top',
                         labels: {
-                            color: '#64748b',
-                            font: { size: 10 },
-                            boxWidth: 10
+                            color: '#94a3b8',
+                            font: { size: 11, family: 'Orbitron', weight: '600' },
+                            boxWidth: 12,
+                            padding: 16,
+                            usePointStyle: true,
+                            pointStyle: 'circle'
                         }
-                    } 
+                    }, 
+                    filler: {
+                        propagate: true
+                    }
+                } 
+            }
+        });
+
+        // Combined Traffic Chart (SERVFAIL + Blocklist)
+        const combinedCtx = document.getElementById('combinedTrafficChart').getContext('2d');
+        const combinedTrafficChart = new Chart(combinedCtx, {
+            type: 'bar',
+            data: { 
+                labels: [], 
+                datasets: [
+                    { 
+                        label: 'SERVFAIL Errors', 
+                        data: [], 
+                        backgroundColor: 'rgba(239, 68, 68, 0.6)',
+                        borderColor: '#ef4444',
+                        borderWidth: 2,
+                        borderRadius: 6,
+                        barThickness: 'flex',
+                        maxBarThickness: 40
+                    },
+                    { 
+                        label: 'Blocked Domains', 
+                        data: [], 
+                        backgroundColor: 'rgba(251, 191, 36, 0.6)',
+                        borderColor: '#fbbf24',
+                        borderWidth: 2,
+                        borderRadius: 6,
+                        barThickness: 'flex',
+                        maxBarThickness: 40
+                    }
+                ] 
+            },
+            options: { 
+                indexAxis: 'y',
+                responsive: true, 
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { 
+                        display: true,
+                        labels: { color: '#94a3b8' } 
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(5, 11, 24, 0.95)',
+                        borderColor: '#64748b',
+                        borderWidth: 1,
+                        bodyColor: '#cbd5e1',
+                        titleColor: '#f8fafc'
+                    }
+                },
+                scales: { 
+                    x: { 
+                        beginAtZero: true,
+                        grid: { color: 'rgba(255, 255, 255, 0.06)' },
+                        ticks: { color: '#94a3b8' }
+                    },
+                    y: { 
+                        grid: { display: false },
+                        ticks: { color: '#94a3b8', font: { size: 11 } }
+                    }
                 } 
             }
         });
@@ -812,7 +1086,7 @@
                 trafficChart.data.labels = data.map(d => d.time);
                 trafficChart.data.datasets[0].data = data.map(d => d.qps);
                 trafficChart.data.datasets[1].data = data.map(d => d.queries);
-                trafficChart.update();
+                trafficChart.update('active');
             } catch (e) { console.error(e); }
         }
 
@@ -1029,6 +1303,7 @@
                 if (!window.firstRunDone) {
                     fetchLogs();
                     updateTraffic();
+                    updateCombinedTraffic();
                     window.firstRunDone = true;
                 }
             } catch (e) { console.error(e); }
@@ -1043,13 +1318,87 @@
                 const res = await fetch('/api/traffic');
                 if (res.status === 401) return;
                 const data = await res.json();
-                trafficChart.data.labels = data.map(d => d.time);
-                trafficChart.data.datasets[0].data = data.map(d => d.qps);
-                trafficChart.data.datasets[1].data = data.map(d => d.queries);
-                trafficChart.update('none');
+                
+                // Smooth transition: only update chart if data actually changed
+                const newLabels = data.map(d => d.time);
+                const newQPS = data.map(d => d.qps);
+                const newQueries = data.map(d => d.queries);
+                
+                // Check if data has changed meaningfully
+                const dataChanged = 
+                    trafficChart.data.labels.length !== newLabels.length ||
+                    newQPS.some((v, i) => Math.abs(v - (trafficChart.data.datasets[0].data[i] || 0)) > 10) ||
+                    newQueries.some((v, i) => Math.abs(v - (trafficChart.data.datasets[1].data[i] || 0)) > 100);
+                
+                if (dataChanged) {
+                    trafficChart.data.labels = newLabels;
+                    trafficChart.data.datasets[0].data = newQPS;
+                    trafficChart.data.datasets[1].data = newQueries;
+                    trafficChart.update('active');
+                }
             } catch (e) { console.error(e); }
             
             setTimeout(updateTraffic, 3000);
+        }
+
+        async function updateCombinedTraffic() {
+            try {
+                const [resServfail, resBlocklist] = await Promise.all([
+                    fetch('/api/traffic/servfail'),
+                    fetch('/api/traffic/blocklist')
+                ]);
+
+                if (resServfail.status === 401 || resBlocklist.status === 401) return;
+
+                const servfailData = await resServfail.json();
+                const blocklistData = await resBlocklist.json();
+
+                // Process data to merge domains
+                const servfailDomains = servfailData.top_domains || [];
+                const blocklistDomains = blocklistData.top_domains || [];
+                
+                // Create a map of all unique domains
+                const domainMap = new Map();
+                
+                servfailDomains.forEach(d => {
+                    if (!domainMap.has(d.domain)) {
+                        domainMap.set(d.domain, { servfail: 0, blocked: 0 });
+                    }
+                    domainMap.get(d.domain).servfail = d.errors;
+                });
+                
+                blocklistDomains.forEach(d => {
+                    if (!domainMap.has(d.domain)) {
+                        domainMap.set(d.domain, { servfail: 0, blocked: 0 });
+                    }
+                    domainMap.get(d.domain).blocked = d.blocked;
+                });
+                
+                // Convert map to array and sort by total activity
+                const mergedData = Array.from(domainMap.entries()).map(([domain, counts]) => ({
+                    domain,
+                    servfail: counts.servfail,
+                    blocked: counts.blocked,
+                    total: counts.servfail + counts.blocked
+                })).sort((a, b) => b.total - a.total).slice(0, 10); // Top 10 combined
+
+                const labels = mergedData.map(d => d.domain);
+                const servfailCounts = mergedData.map(d => d.servfail);
+                const blockedCounts = mergedData.map(d => d.blocked);
+
+                combinedTrafficChart.data.labels = labels;
+                combinedTrafficChart.data.datasets[0].data = servfailCounts;
+                combinedTrafficChart.data.datasets[1].data = blockedCounts;
+                combinedTrafficChart.update('active');
+                
+                const totalServfail = servfailData.summary.total_servfail_errors;
+                const totalBlocked = blocklistData.summary.total_blocked;
+                document.getElementById('combined-count').innerText = 
+                    `${totalServfail} errors / ${totalBlocked} blocked`;
+
+            } catch (e) { console.error(e); }
+            
+            setTimeout(updateCombinedTraffic, 5000);
         }
 
         function toggleFullscreen(elemId) {

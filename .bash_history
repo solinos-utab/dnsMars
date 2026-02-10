@@ -335,3 +335,65 @@ cp /etc/systemd/system/dnsmars-gui.service /home/dns/backup_github/systemd/ 2>/d
 dig @127.0.0.1 poker.com AAAA +short
 ls -l /home/dns/blocked_final.html
 curl -I -k https://127.0.0.1/
+ls
+sudo nano blocked_final.html
+clear
+ls
+reboot
+sudo reboot
+. "\home\dns\.cursor-server\bin\linux-x64\32cfbe848b35d9eb320980195985450f244b3030/out/vs/workbench/contrib/terminal/common/scripts/shellIntegration-bash.sh"
+. "\home\dns\.cursor-server\bin\linux-x64\3578107fdf149b00059ddad37048220e41681000/out/vs/workbench/contrib/terminal/common/scripts/shellIntegration-bash.sh"
+sudo systemctl restart dnsmars-gui
+sudo cp /home/dns/blocked_final.html /var/www/html/blocked.html
+. "\home\dns\.cursor-server\bin\linux-x64\3578107fdf149b00059ddad37048220e41681000/out/vs/workbench/contrib/terminal/common/scripts/shellIntegration-bash.sh"
+systemctl status ssh
+systemctl restart ssh 
+systemctl status ssh
+ufw status
+sudo ufw status
+free -h
+dmesg -T | tail -n 50
+sudo dmesg -T | tail -n 50
+ss -tulpn | grep 5000
+netstat -tulpn | grep 5000
+curl -vk https://localhost:5000
+curl -v http://localhost:5000
+sudo ss -tulpn | grep :5000
+openssl s_client -connect 127.0.0.1:5000
+exit
+sudo systemctl restart dnsmars-gui
+ls
+ping 8.8.8.8
+ip a
+ip r
+systemctl status ssh
+cat /home/dns/FILES_CREATED_100GBPS.txt
+echo "" && cat << 'EOF'
+
+=== INSERTING TEST SCHEDULE ===
+EOF
+
+sqlite3 /home/dns/traffic_history.db << 'SQL'
+UPDATE trust_schedule SET enabled=1, start_time='05:00', end_time='19:00', trust_ips='8.8.8.8,1.1.1.1' WHERE id=1;
+SELECT "=== CURRENT SCHEDULE ===" as result;
+SELECT 'Enabled: ' || enabled || ' | Start: ' || start_time || ', End: ' || end_time || ' | IPs: ' || trust_ips FROM trust_schedule WHERE id=1;
+SQL
+
+sleep 2 && echo "" && echo "=== GUARD IAN LOG (LAST 15 LINES) ===" && tail -15 /home/dns/guardian.log
+sleep 2
+ps aux | grep "app.py" | grep python | grep -v grep
+sleep 2
+echo "✅ Guardian restarted"
+ps aux | grep guardian.py | grep -v grep | head -1
+echo "✅ Flask App:" && ps aux | grep "python3.*app.py" | grep -v grep | wc -l && echo ""
+echo "✅ Guardian:" && ps aux | grep "python3.*guardian" | grep -v grep | wc -l && echo ""
+echo "✅ Services:" && systemctl status unbound dnsmasq 2>/dev/null | grep Active | head -2
+sleep 3
+ps aux | grep "app.py" | grep python | grep -v grep | wc -l
+chmod +x /tmp/test_dns_trust.sh && /tmp/test_dns_trust.sh
+cat /tmp/self_healing_analysis.txt
+cat /tmp/performance_analysis.txt
+echo "✅ Config updated" && cat /etc/unbound/unbound.conf.d/smartdns.conf | grep -A 10 "Anti DDoS"
+echo "✅ Dnsmasq config updated" && grep -E 'cache-size|dns-forward-max' /etc/dnsmasq.d/00-base.conf
+cat /tmp/optimization_summary.txt
+cat /tmp/traffic_analysis_update_summary.txt

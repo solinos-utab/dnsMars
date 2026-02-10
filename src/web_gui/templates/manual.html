@@ -52,6 +52,17 @@
 
     <h2>4. Troubleshooting</h2>
     
+    <h3>High Disk Usage?</h3>
+    <p>If the server disk fills up (logs can grow large):</p>
+    <ul>
+        <li><strong>Symptom:</strong> DNS stops working, Web GUI sluggish.</li>
+        <li><strong>Fix:</strong> Logs are now automatically rotated. If critical, run:</li>
+    </ul>
+    <pre>
+sudo truncate -s 0 /var/log/dnsmasq.log
+sudo systemctl restart dnsmasq
+    </pre>
+
     <h3>Client Cannot Browse?</h3>
     <ol>
         <li>Check if the client's DNS IP is set to this server's IP.</li>

@@ -62,13 +62,13 @@ dnsMars/
     git clone https://github.com/solinos-utab/dnsMars.git /home/dns/dnsMars
     ```
 
-2.  **Run Installer (Optional)**:
+2.  **Run Auto-Installer**:
     ```bash
-    cd dnsMars/scripts
+    cd dnsMars
     sudo ./install.sh
     ```
 
-3.  **Manual Setup**:
+3.  **Manual Setup (Alternative)**:
     - Copy configs from `config/` to `/etc/`.
     - Enable services: `systemctl enable --now dnsmasq unbound guardian`.
 

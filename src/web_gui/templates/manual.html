@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DNS Mars - User Manual</title>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; color: #333; }
+        h1 { color: #2563eb; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        h2 { color: #1e40af; margin-top: 30px; }
+        h3 { color: #1e3a8a; }
+        code { background: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-family: monospace; }
+        pre { background: #1e293b; color: #fff; padding: 15px; border-radius: 8px; overflow-x: auto; }
+        .note { background: #eff6ff; border-left: 4px solid #2563eb; padding: 15px; margin: 20px 0; }
+        .warning { background: #fef2f2; border-left: 4px solid #ef4444; padding: 15px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>DNS Mars - User Manual</h1>
+    <p><strong>Version:</strong> 2.0 (Recursive Edition)</p>
+    <p><strong>Last Updated:</strong> 2026-02-10</p>
+
+    <h2>1. System Overview</h2>
+    <p>DNS Mars is a high-performance DNS resolver designed for ISPs. It uses a <strong>Recursive Architecture</strong>, meaning it resolves domain names directly from root servers without relying on third-party upstreams like Google or Cloudflare. This ensures maximum privacy and independence.</p>
+
+    <h2>2. Web Management GUI</h2>
+    <p>Access the GUI at: <code>https://YOUR_SERVER_IP:5000/</code></p>
+    
+    <h3>Key Features:</h3>
+    <ul>
+        <li><strong>DNS Trust (Internet Positif):</strong> Toggle this switch to Enable/Disable blocking of regulated content.
+            <ul>
+                <li><strong>Enable:</strong> Blocks gambling/porn domains (compliance mode).</li>
+                <li><strong>Disable:</strong> Unblocks regulated content (for testing/special use).</li>
+                <li><em>Note: Malware blocking remains active regardless of this setting.</em></li>
+            </ul>
+        </li>
+        <li><strong>Flush Cache:</strong> Clears DNS cache immediately. Use this if a domain is not resolving correctly or has changed IP recently.</li>
+        <li><strong>Restart Services:</strong> Safely restarts Dnsmasq and Unbound.</li>
+    </ul>
+
+    <h2>3. Self-Healing Guardian</h2>
+    <p>The system runs an intelligent background service called <strong>Guardian</strong>.</p>
+    <div class="note">
+        <strong>What it does:</strong>
+        <ul>
+            <li>Checks DNS health every 10 seconds.</li>
+            <li>Automatically repairs broken services.</li>
+            <li>Updates firewall rules if the server IP changes.</li>
+        </ul>
+    </div>
+
+    <h2>4. Troubleshooting</h2>
+    
+    <h3>Client Cannot Browse?</h3>
+    <ol>
+        <li>Check if the client's DNS IP is set to this server's IP.</li>
+        <li>Try flushing the cache via the Web GUI.</li>
+        <li>Check the "System Load" on the dashboard.</li>
+    </ol>
+
+    <h3>Google DNS Leaking?</h3>
+    <p>The system is configured to block forwarding to 8.8.8.8. If you see Google DNS in a leak test:</p>
+    <ul>
+        <li>Check your browser's "Secure DNS" (DoH) settings and disable them.</li>
+        <li>Ensure your router isn't forcing a secondary DNS.</li>
+    </ul>
+
+    <h2>5. Backup & Restore</h2>
+    <p>The system automatically backs up configuration to GitHub.</p>
+    <pre>/home/dns/dnsMars/scripts/backup_to_github.sh</pre>
+
+</body>
+</html>

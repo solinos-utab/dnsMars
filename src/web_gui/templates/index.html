@@ -445,9 +445,17 @@
                         <h2 class="text-sm font-orbitron text-white uppercase tracking-wider">SERVFAIL & BLOCKLIST ANALYSIS</h2>
                         <div class="flex items-center gap-2">
                             <span id="combined-count" class="text-xs font-orbitron text-slate-300">Loading...</span>
-                            <button onclick="toggleFullscreen('combined-traffic-container')" class="text-slate-400 hover:text-white transition p-1" title="Toggle Fullscreen">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                            <button onclick="openAnalysisListModal()" class="text-slate-500 hover:text-blue-400 transition p-1.5 hover:bg-white/5 rounded-lg" title="View Details">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                                </svg>
                             </button>
+                            <button onclick="toggleFullscreen('combined-traffic-container')" class="fullscreen-close-btn hidden text-xs bg-red-500/20 hover:bg-red-500/40 text-red-400 px-3 py-1 rounded-lg border border-red-500/30 transition font-orbitron">EXIT</button>
+                            <div class="fullscreen-btn-wrapper">
+                                <button onclick="toggleFullscreen('combined-traffic-container')" class="text-slate-400 hover:text-white transition p-1" title="Toggle Fullscreen">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="h-[280px] chart-wrapper"><canvas id="combinedTrafficChart"></canvas></div>
@@ -621,6 +629,41 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- Analysis List Modal -->
+    <div id="analysis-list-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] hidden flex items-center justify-center p-4">
+        <div class="glass max-w-2xl w-full rounded-2xl border border-blue-500/30 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="bg-gradient-to-r from-blue-900/20 to-purple-900/20 p-5 border-b border-white/10 shrink-0">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h3 class="text-blue-400 font-orbitron text-sm">SERVFAIL & BLOCKLIST DETAILS</h3>
+                        <p class="text-[9px] text-slate-500 font-orbitron mt-1 uppercase">Detailed Domain Analysis</p>
+                    </div>
+                    <button onclick="closeAnalysisListModal()" class="text-slate-500 hover:text-white transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="p-0 overflow-hidden flex-1 flex flex-col">
+                <div class="overflow-y-auto flex-1 p-4 custom-scrollbar">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="sticky top-0 bg-slate-900/95 backdrop-blur-md z-10">
+                            <tr>
+                                <th class="py-3 px-4 text-[10px] font-orbitron text-slate-500 border-b border-white/10">DOMAIN</th>
+                                <th class="py-3 px-4 text-[10px] font-orbitron text-slate-500 border-b border-white/10 text-right">TYPE</th>
+                                <th class="py-3 px-4 text-[10px] font-orbitron text-slate-500 border-b border-white/10 text-right">COUNT</th>
+                            </tr>
+                        </thead>
+                        <tbody id="analysis-list-body" class="text-[11px] font-mono">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1003,59 +1046,127 @@
 
         // Combined Traffic Chart (SERVFAIL + Blocklist)
         const combinedCtx = document.getElementById('combinedTrafficChart').getContext('2d');
+        
+        // Gradient for Servfail
+        const servfailGradient = combinedCtx.createLinearGradient(0, 0, 0, 320);
+        servfailGradient.addColorStop(0, 'rgba(239, 68, 68, 0.25)'); // Red
+        servfailGradient.addColorStop(0.5, 'rgba(239, 68, 68, 0.1)');
+        servfailGradient.addColorStop(1, 'rgba(239, 68, 68, 0.01)');
+
+        // Gradient for Blocked
+        const blockedGradient = combinedCtx.createLinearGradient(0, 0, 0, 320);
+        blockedGradient.addColorStop(0, 'rgba(245, 158, 11, 0.25)'); // Amber
+        blockedGradient.addColorStop(0.5, 'rgba(245, 158, 11, 0.1)');
+        blockedGradient.addColorStop(1, 'rgba(245, 158, 11, 0.01)');
+
         const combinedTrafficChart = new Chart(combinedCtx, {
-            type: 'bar',
+            type: 'line',
             data: { 
                 labels: [], 
                 datasets: [
                     { 
                         label: 'SERVFAIL Errors', 
                         data: [], 
-                        backgroundColor: 'rgba(239, 68, 68, 0.6)',
                         borderColor: '#ef4444',
-                        borderWidth: 2,
-                        borderRadius: 6,
-                        barThickness: 'flex',
-                        maxBarThickness: 40
+                        backgroundColor: servfailGradient,
+                        borderWidth: 2.5,
+                        tension: 0.5,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointBorderWidth: 0,
+                        pointHitRadius: 10
                     },
                     { 
                         label: 'Blocked Domains', 
                         data: [], 
-                        backgroundColor: 'rgba(251, 191, 36, 0.6)',
-                        borderColor: '#fbbf24',
+                        borderColor: '#f59e0b',
+                        backgroundColor: blockedGradient,
                         borderWidth: 2,
-                        borderRadius: 6,
-                        barThickness: 'flex',
-                        maxBarThickness: 40
+                        tension: 0.5,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointBorderWidth: 0,
+                        pointHitRadius: 10
                     }
                 ] 
             },
             options: { 
-                indexAxis: 'y',
                 responsive: true, 
                 maintainAspectRatio: false,
+                animation: {
+                    duration: 300,
+                    easing: 'easeInOutQuart'
+                },
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
                 plugins: {
                     legend: { 
                         display: true,
-                        labels: { color: '#94a3b8' } 
+                        position: 'top',
+                        labels: {
+                            color: '#94a3b8',
+                            font: { size: 11, family: 'Orbitron', weight: '600' },
+                            boxWidth: 12,
+                            padding: 16,
+                            usePointStyle: true,
+                            pointStyle: 'circle'
+                        }
                     },
                     tooltip: {
+                        enabled: true,
                         backgroundColor: 'rgba(5, 11, 24, 0.95)',
-                        borderColor: '#64748b',
+                        borderColor: '#ef4444',
                         borderWidth: 1,
-                        bodyColor: '#cbd5e1',
-                        titleColor: '#f8fafc'
+                        titleColor: '#f59e0b',
+                        bodyColor: '#64748b',
+                        boxPadding: 8,
+                        titleFont: { size: 11, family: 'Orbitron', weight: 'bold' },
+                        bodyFont: { size: 10 },
+                        padding: 12,
+                        displayColors: true,
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y;
+                            }
+                        }
                     }
                 },
                 scales: { 
                     x: { 
-                        beginAtZero: true,
-                        grid: { color: 'rgba(255, 255, 255, 0.06)' },
-                        ticks: { color: '#94a3b8' }
+                        grid: { 
+                            display: true,
+                            color: 'rgba(255, 255, 255, 0.03)',
+                            drawBorder: false
+                        },
+                        ticks: { 
+                            color: '#64748b', 
+                            font: { size: 10, weight: '500', family: 'monospace' },
+                            maxRotation: 45,
+                            minRotation: 0
+                        }
                     },
                     y: { 
-                        grid: { display: false },
-                        ticks: { color: '#94a3b8', font: { size: 11 } }
+                        beginAtZero: true,
+                        position: 'left',
+                        grid: { 
+                            color: 'rgba(255, 255, 255, 0.06)',
+                            drawBorder: false
+                        },
+                        ticks: { 
+                            color: '#ef4444', 
+                            font: { size: 11, weight: '600' },
+                            padding: 8
+                        },
+                        title: {
+                            display: true,
+                            text: '░ COUNT ░',
+                            color: '#ef4444',
+                            font: { size: 10, family: 'Orbitron', weight: 'bold' }
+                        }
                     }
                 } 
             }
@@ -1404,6 +1515,21 @@
                 document.getElementById('combined-count').innerText = 
                     `${totalServfail} errors / ${totalBlocked} blocked`;
 
+                // Update Domain List Table (in Popup)
+                const tbody = document.getElementById('analysis-list-body');
+                if (tbody) {
+                    tbody.innerHTML = mergedData.map(d => `
+                        <tr class="hover:bg-white/5 transition border-b border-white/5">
+                            <td class="py-2 px-4 text-slate-300">${d.domain}</td>
+                            <td class="py-2 px-4 text-right">
+                                ${d.servfail > 0 ? '<span class="text-[9px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/30">SERVFAIL</span>' : ''}
+                                ${d.blocked > 0 ? '<span class="text-[9px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded border border-amber-500/30 ml-1">BLOCKED</span>' : ''}
+                            </td>
+                            <td class="py-2 px-4 text-right font-orbitron text-slate-400">${d.total}</td>
+                        </tr>
+                    `).join('');
+                }
+
             } catch (e) { console.error(e); }
             
             setTimeout(updateCombinedTraffic, 5000);
@@ -1437,15 +1563,44 @@
         document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 
         function handleFullscreenChange() {
+            // Handle Traffic Analysis
             const elem = document.getElementById('traffic-container');
-            if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
-                elem.classList.remove('fullscreen-mode');
-            } else {
+            if (document.fullscreenElement === elem || document.webkitFullscreenElement === elem) {
                 elem.classList.add('fullscreen-mode');
+            } else {
+                elem.classList.remove('fullscreen-mode');
             }
-            if (trafficChart) {
-                trafficChart.resize();
+            
+            // Handle Combined Analysis
+            const combinedElem = document.getElementById('combined-traffic-container');
+            const isCombinedFullscreen = (document.fullscreenElement === combinedElem || document.webkitFullscreenElement === combinedElem);
+            
+            if (isCombinedFullscreen) {
+                combinedElem.classList.add('fullscreen-mode');
+                // Show close button
+                combinedElem.querySelector('.fullscreen-close-btn').classList.remove('hidden');
+                combinedElem.querySelector('.fullscreen-btn-wrapper').classList.add('hidden'); // Hide expand button
+            } else {
+                combinedElem.classList.remove('fullscreen-mode');
+                // Hide close button
+                if (combinedElem.querySelector('.fullscreen-close-btn')) {
+                    combinedElem.querySelector('.fullscreen-close-btn').classList.add('hidden');
+                }
+                if (combinedElem.querySelector('.fullscreen-btn-wrapper')) {
+                    combinedElem.querySelector('.fullscreen-btn-wrapper').classList.remove('hidden');
+                }
             }
+
+            if (trafficChart) trafficChart.resize();
+            if (combinedTrafficChart) combinedTrafficChart.resize();
+        }
+
+        function openAnalysisListModal() {
+            document.getElementById('analysis-list-modal').classList.remove('hidden');
+        }
+
+        function closeAnalysisListModal() {
+            document.getElementById('analysis-list-modal').classList.add('hidden');
         }
 
         function updateMetricValue(id, val) {

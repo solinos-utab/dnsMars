@@ -10,16 +10,19 @@ import json
 # --- CONFIGURATION ---
 LOG_FILE = "/var/log/syslog"
 DNSMASQ_LOG = "/var/log/dnsmasq.log"
+NGINX_LOG = "/var/log/nginx/access.log"
 CONFIG_FILE = "/home/dns/guardian_config.json"
 
 # Default values
 DEFAULT_BAN_THRESHOLD = 10000
 DEFAULT_MALICIOUS_THRESHOLD = 200
+DISK_CRITICAL_THRESHOLD = 90  # Percent
 
 def load_config():
     config = {
         "ban_threshold": DEFAULT_BAN_THRESHOLD,
-        "malicious_threshold": DEFAULT_MALICIOUS_THRESHOLD
+        "malicious_threshold": DEFAULT_MALICIOUS_THRESHOLD,
+        "disk_threshold": DISK_CRITICAL_THRESHOLD
     }
     if os.path.exists(CONFIG_FILE):
         try:
@@ -34,6 +37,7 @@ def load_config():
 config = load_config()
 BAN_THRESHOLD = config["ban_threshold"]
 MALICIOUS_THRESHOLD = config["malicious_threshold"]
+DISK_THRESHOLD = config.get("disk_threshold", DISK_CRITICAL_THRESHOLD)
 
 WHITELIST_FILE = "/home/dns/whitelist.conf"
 GUARDIAN_LOG = "/home/dns/guardian.log"
@@ -71,6 +75,7 @@ def reload_whitelist_if_needed():
         config = load_config()
         BAN_THRESHOLD = config["ban_threshold"]
         MALICIOUS_THRESHOLD = config["malicious_threshold"]
+        DISK_THRESHOLD = config.get("disk_threshold", DISK_CRITICAL_THRESHOLD)
         
         LAST_WL_RELOAD = time.time()
         # Clean up banned_ips.txt if needed
@@ -457,6 +462,45 @@ def check_and_repair_services():
         log_event(f"ALERT: Critical firewall rules ({', '.join(reason)}) are missing. Restoring...")
         run_cmd("sudo bash /home/dns/setup_firewall.sh")
 
+def check_disk_space():
+    """
+    Emergency Disk Protection.
+    If disk usage exceeds threshold (e.g. 90%), aggressively clean logs.
+    """
+    try:
+        # Get root partition usage
+        cmd = "df -h / | awk 'NR==2 {print $5}' | sed 's/%//'"
+        res = run_cmd(cmd)
+        if not res or not res.stdout:
+            return
+            
+        usage = int(res.stdout.strip())
+        
+        if usage >= DISK_THRESHOLD:
+            log_event(f"CRITICAL: Disk usage at {usage}% (Threshold: {DISK_THRESHOLD}%). Executing EMERGENCY cleanup...")
+            
+            # 1. Truncate Logs immediately
+            if os.path.exists(DNSMASQ_LOG):
+                run_cmd(f"truncate -s 0 {DNSMASQ_LOG}")
+                log_event(f"Truncated {DNSMASQ_LOG}")
+                
+            if os.path.exists(NGINX_LOG):
+                run_cmd(f"truncate -s 0 {NGINX_LOG}")
+                log_event(f"Truncated {NGINX_LOG}")
+                
+            # 2. Check for rotated logs that are huge and delete them
+            # Delete any .gz or .1 log file in /var/log/nginx older than 0 days (immediate)
+            run_cmd("find /var/log/nginx -name '*.gz' -delete")
+            run_cmd("find /var/log/nginx -name '*.1' -delete")
+            
+            # Same for dnsmasq
+            run_cmd("find /var/log -name 'dnsmasq.log.*.gz' -delete")
+            
+            log_event("Emergency cleanup completed.")
+            
+    except Exception as e:
+        log_event(f"Error checking disk space: {e}")
+
 def detect_and_block_attacks():
     if not is_dns_trust_enabled():
         return
@@ -666,6 +710,9 @@ if __name__ == "__main__":
     
     while True:
         try:
+            # 1. Emergency Disk Check (Priority 1)
+            check_disk_space()
+            
             # Refresh server IP and Whitelist in case of network changes
             reload_whitelist_if_needed()
             

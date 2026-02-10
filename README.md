@@ -1,6 +1,6 @@
 # dnsMars - Intelligent DNS Guardian & Management System
 
-> **Last Updated:** 2026-02-11 02:16:38 WIB
+> **Last Updated:** 2026-02-11 02:32:54 WIB
 
 **dnsMars** is an enterprise-grade, high-performance, and secure DNS infrastructure designed for ISP and large-scale network environments. It combines the speed of **Dnsmasq** (frontend) with the security and reliability of **Unbound** (recursive backend), managed by a self-healing **Guardian** system.
 
@@ -14,10 +14,13 @@
 - **QNAME Minimisation**: Enhanced privacy by minimizing data sent to authoritative servers.
 - **DNSSEC Validated**: Ensures authenticity of DNS responses.
 
-### 2. **Intelligent Guardian (Self-Healing)**
+### 2. **Intelligent Guardian (Self-Healing) & Disk Protection**
 - **Auto-Repair**: Automatically detects and restarts services (Unbound/Dnsmasq) if they hang or crash.
 - **Zero-Downtime Updates**: Manages configuration updates without disrupting service.
 - **Dynamic IP Handling**: Automatically updates configs when server IP changes.
+- **Emergency Disk Protection (New)**: 
+    - Monitors disk usage every 10s.
+    - If disk usage > 90%, automatically truncates logs to prevent server crash.
 
 ### 3. **Security & Compliance**
 - **Internet Positif (Trust)**: Toggleable filtering for regulatory compliance (managed via Web GUI).

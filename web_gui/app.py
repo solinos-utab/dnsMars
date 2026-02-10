@@ -386,8 +386,13 @@ def get_blocklist_stats(limit=10):
         if not result:
             return []
         
-        # Additional check for blocked entries (0.0.0.0 or 127.0.0.1 responses)
-        cmd_blocked = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -E 'reply from |addresses' | grep -E '0\\.0\\.0\\.0|127\\.0\\.0\\.1' | awk '{{print $8}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        # Additional check for blocked entries (0.0.0.0, 127.0.0.1, or Server IP responses)
+        server_ip = get_server_ip()
+        server_ip_esc = server_ip.replace('.', '\\.')
+        
+        # Match "config domain is IP" or "reply domain is IP"
+        # We look for 0.0.0.0, 127.0.0.1, or the Server IP (for block page redirect)
+        cmd_blocked = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -E 'config|reply' | grep -E ' is (0\\.0\\.0\\.0|127\\.0\\.0\\.1|{server_ip_esc})$' | awk '{{print $6}}' | sort | uniq -c | sort -rn | head -n {limit}"
         blocked_result = subprocess.run(cmd_blocked, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         blocklist_data = []

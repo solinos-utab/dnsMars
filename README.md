@@ -1,5 +1,7 @@
 # dnsMars - Intelligent DNS Guardian & Management System
 
+> **Last Updated:** 2026-02-11 02:16:38 WIB
+
 **dnsMars** is an enterprise-grade, high-performance, and secure DNS infrastructure designed for ISP and large-scale network environments. It combines the speed of **Dnsmasq** (frontend) with the security and reliability of **Unbound** (recursive backend), managed by a self-healing **Guardian** system.
 
 ---

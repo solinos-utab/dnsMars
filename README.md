@@ -1,127 +1,45 @@
-# BUKU PANDUAN SISTEM - PT MARS DATA TELEKOMUNIKASI
-## DUAL STACK DNS ENGINE (ISP SCALE EDITION)
+# DNS MARS - ISP SCALE EDITION (V2.0)
+**High Performance Hybrid DNS (Dnsmasq + Unbound) with Advanced Threat Protection**
 
-Dokumentasi ini berisi panduan operasional dan teknis untuk sistem DNS Mars Data yang telah dioptimalkan untuk skala ISP dengan topologi NAT.
+Sistem DNS yang dioptimalkan untuk ISP dengan topologi NAT skala besar, mampu menangani ribuan user dengan stabilitas tinggi dan fitur keamanan canggih.
 
----
+## 🚀 Fitur Utama
 
-### 1. RINGKASAN SISTEM
-Sistem ini menggunakan arsitektur **Hybrid DNS High Performance** yang menggabungkan kecepatan **dnsmasq** dengan keamanan serta rekursi tingkat tinggi dari **Unbound**.
+### 1. Hybrid DNS Engine (ISP Tuned)
+- **Dnsmasq:** Caching layer depan yang sangat cepat.
+- **Unbound:** Recursive resolver yang aman dengan validasi DNSSEC.
+- **Performance:** Menangani 100k+ QPS dengan latency rendah.
 
-- **DNS Engine:** Hybrid (dnsmasq + Unbound) - Tuned for High Concurrency.
-- **Security:** Anti-DDoS (iptables Hashlimit), Malware Shield (100k+ domains), Intelligent Self-Healing Guardian.
-- **Web GUI:** Management Dashboard berbasis Flask dengan antarmuka modern dan responsif.
-- **Topologi:** Mendukung **NAT Topology** (Ribuan user dibalik satu IP Public) dengan manajemen koneksi yang efisien.
+### 2. System Threat Analysis (BARU)
+- **Botnet & Malware Blocking:** Mendeteksi dan memblokir trafik ACS/TR-069, Crypto Miners, dan C2 Servers.
+- **Bulk Management:** Fitur Search & Select All untuk memblokir ratusan domain ancaman sekaligus.
+- **Safe Blocking:** Memutus jalur komunikasi malware tanpa memutus internet user.
+- **Dashboard:** Monitoring real-time dengan "One-Click Block".
 
----
+### 3. Internet Positif & Trust
+- **Compliance:** Pemblokiran konten negatif sesuai regulasi.
+- **Smart Redirect:** Intersepsi HTTPS yang mulus ke halaman blokir.
+- **False Positive Fix:** Whitelist otomatis untuk `connectivitycheck` Android/iOS (Anti-Captive Portal issue).
 
-### 2. DNS TRUST & INTERNET POSITIF
-Fitur ini dirancang untuk mematuhi regulasi pemblokiran konten negatif (Internet Positif) dengan pengalaman pengguna yang mulus.
+### 4. Keamanan & Stabilitas
+- **Log Safety:** Rotasi log otomatis (Max 100MB) mencegah disk penuh.
+- **Emergency Protection:** Guardian menghapus log jika disk > 90%.
+- **Anti-DDoS:** Iptables hashlimit untuk mitigasi serangan flood.
+- **Auto-Healing:** Service restart otomatis jika macet/crash.
 
-- **HTTPS Redirect:** Sistem kini mendukung redirect otomatis dari akses HTTPS ke domain terblokir menuju halaman blokir HTTP (via 302 Redirect) setelah user melewati peringatan SSL.
-- **Cara Kerja:** Sistem secara otomatis mencegat trafik DNS dan HTTP/HTTPS melalui firewall (NAT) untuk mengarahkan domain terblokir ke halaman peringatan internal.
-- **Konfigurasi Utama:** `/etc/dnsmasq.d/smartdns.conf` (Single Source of Truth).
-- **Status:** Jika DNS Trust "Enabled", pemblokiran aktif. Jika "Disabled", sistem tetap melakukan intersepsi namun dengan aturan yang lebih longgar.
-- **Guardian:** Layanan `guardian.py` memastikan aturan firewall tetap aktif meskipun sistem direstart.
+## 🛠️ Instalasi & Update
+Jalankan script auto-installer:
+```bash
+sudo ./install.sh
+```
 
-#### Captive Portal Bypass (False Positive Fix)
-Untuk mencegah perangkat (Android/iOS) mendeteksi jaringan sebagai "Captive Portal" palsu yang menyebabkan popup "Sign in to network" muncul terus-menerus:
+## 📊 Web Management GUI
+Akses dashboard monitoring melalui browser:
+- **URL:** `https://IP_SERVER:5000`
+- **Default User:** `admin` (Password di-set saat login pertama)
 
-- **Mechanism:** Whitelisting domain connectivity check (misal: `connectivitycheck.gstatic.com`, `android.clients.google.com`) agar resolve ke IP asli via Unbound, bukan ke IP Block Page.
-- **Config:** `/etc/dnsmasq.d/captive_portal.conf`
-- **Domains Covered:** Android (Google), iOS (Apple), Windows, Firefox.
-- **Benefit:** User tidak akan melihat halaman blokir Internet Positif saat baru terkoneksi ke WiFi, kecuali mereka benar-benar mengakses konten terlarang.
-
----
-
-### 3. PROTEKSI DISK DARURAT (NEW)
-Guardian System kini dilengkapi dengan **Emergency Disk Protection** untuk mencegah kegagalan sistem akibat log yang membanjir:
-
-- **Monitoring Real-time:** Guardian memantau penggunaan disk root (`/`) setiap 10 detik.
-- **Critical Threshold:** Jika penggunaan disk mencapai **90%**, sistem akan masuk mode darurat.
-- **Auto-Cleanup:**
-    - Log aktif (`dnsmasq.log`, `access.log`) akan langsung di-truncate (dikosongkan) menjadi 0 byte.
-    - File log arsip (`.gz`, `.1`) akan dihapus paksa.
-    - Mencegah server crash atau Unbound gagal start karena kehabisan ruang disk.
+## 📚 Dokumentasi Lengkap
+Lihat file `PANDUAN_SISTEM.md` atau akses menu **MANUAL** di Web GUI untuk panduan operasional detail.
 
 ---
-
-### 4. MITIGASI SERANGAN INTERNAL & STABILITAS
-Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani ancaman kestabilan:
-
-- **Anti-Looping:** Dnsmasq dan Unbound dikonfigurasi untuk mendeteksi DNS forwarding loops.
-- **Memory Leak & Swap Thrashing:** 
-    - Guardian memantau penggunaan RAM dan Swap.
-    - Jika RAM > 90% dan Swap penuh (Thrashing), layanan DNS akan direstart otomatis untuk membebaskan memori sebelum sistem hang (OOM).
-- **UDP Drop Prevention:** 
-    - Kernel buffer (`rmem_default`, `rmem_max`) ditingkatkan hingga 16MB untuk mencegah paket loss saat traffic tinggi.
-- **IRQ Overload:** Menggunakan `irqbalance` untuk mendistribusikan beban interupsi jaringan ke semua core CPU.
-- **Botnet Mitigation:** Rate limit per-IP (20.000 QPS) mencegah satu botnet yang terinfeksi melumpuhkan seluruh server.
-
----
-
-### 5. ANALISIS TRAFIK & MONITORING
-Dashboard Web GUI menyediakan pemantauan real-time yang telah ditingkatkan:
-
-- **Traffic Analysis (Live QPS):**
-    - **Garis Magenta (Pink):** Menampilkan **QPS (Queries Per Second)** murni per detik.
-    - **Area Biru (Cyan):** Menampilkan **Snapshot Queries** (kepadatan query terbaru).
-    - **High Load Warning:** Indikator peringatan akan muncul jika QPS melebihi **90.000 QPS**.
-    - **Sampling Engine:** Menggunakan *Deep Log Sampling* (200k baris) untuk akurasi tinggi pada trafik padat.
-
-- **Combined Analysis (Baru):**
-    - **SERVFAIL & Blocklist:** Grafik batang gabungan yang menampilkan domain dengan error SERVFAIL terbanyak dan domain yang paling sering diblokir dalam satu tampilan ringkas.
-    - Membantu identifikasi cepat antara masalah jaringan (SERVFAIL) atau kebijakan blokir (Blocklist).
-
-- **Hardware Monitoring:**
-    - **CPU & RAM:** Beban pemrosesan real-time.
-    - **HDD Usage:** Pemantauan sisa ruang penyimpanan disk.
-
----
-
-### 5. FITUR BARU: RESPONSIVE FULLSCREEN MONITORING
-Sistem kini dilengkapi dengan mode pemantauan layar penuh yang adaptif:
-- **Auto-Scale:** Grafik akan menyesuaikan ukurannya secara otomatis mengikuti orientasi dan ukuran layar perangkat.
-- **Mobile Friendly:** Dioptimalkan untuk iPhone dan Android dengan navigasi "Exit Fullscreen" yang mudah.
-- **High Performance:** Mode fullscreen menggunakan akselerasi GPU browser untuk memastikan render grafik tetap lancar tanpa membebani CPU server.
-
----
-
-### 6. BATASAN PERFORMA (ISP SCALE LIMITS)
-Sistem telah dikonfigurasi ulang untuk menangani topologi NAT dimana satu IP Public mewakili ribuan user:
-
-- **Global Rate Limit:** **100.000 QPS** (Perlindungan level server).
-- **Per-IP Rate Limit:** **20.000 QPS** (Ditingkatkan dari 1.000 QPS untuk mengakomodasi NAT).
-- **Unbound Rate Limit:** **20.000 QPS** per IP untuk rekursi.
-- **DNS Flood Protection:** Menggunakan modul `hashlimit` iptables yang efisien untuk memitigasi serangan tanpa memblokir trafik legit dari NAT yang padat.
-
----
-
-### 7. MANAJEMEN WHITELIST & MALWARE
-- **Global Whitelist:** IP/Subnet yang ditambahkan ke Whitelist akan melewati (bypass) semua aturan pemblokiran, rate limiting, dan intersepsi.
-- **Malware Shield:** Menggunakan database `/etc/dnsmasq.d/malware.conf` yang diperbarui secara berkala untuk memblokir situs berbahaya.
-
----
-
-### 8. PEMELIHARAAN (MAINTENANCE)
-- **Log System:** Sistem secara otomatis melakukan rotasi log untuk mencegah kepenuhan disk.
-- **Intelligent Self-Healing:** 
-    - `guardian.py` secara aktif memonitor port DNS (53/UDP) dan Web GUI (5000/TCP).
-    - Jika layanan macet atau mati, Guardian akan mencoba melakukan restart otomatis dan memperbaiki konfigurasi yang korup.
-    - Mendeteksi perubahan IP Network dan secara otomatis memperbarui aturan Firewall tanpa downtime.
-
----
-
-### 9. TROUBLESHOOTING WEB GUI
-Jika Web GUI tidak dapat diakses:
-
-1. **Pastikan menggunakan HTTPS (bukan HTTP):** `https://IP_SERVER:5000`
-2. **Sertifikat Self-Signed:** Browser akan menampilkan peringatan keamanan - klik "Advanced" → "Proceed" untuk melanjutkan.
-3. **Cek status layanan:** `sudo systemctl status dnsmars-gui`
-4. **Restart Web GUI:** `sudo systemctl restart dnsmars-gui`
-5. **Health Check:** Akses `https://IP_SERVER:5000/health` untuk memastikan layanan aktif.
-6. **Password default:** `admin` (segera ganti setelah login pertama)
-
----
-*Dokumen ini diperbarui secara otomatis oleh System Assistant.*
-*© 2026 PT MARS DATA TELEKOMUNIKASI*
+© 2026 PT MARS DATA TELEKOMUNIKASI

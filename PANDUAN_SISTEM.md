@@ -60,7 +60,20 @@ Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani
 
 ---
 
-### 5. ANALISIS TRAFIK & MONITORING
+### 5. SYSTEM THREAT ANALYSIS (BARU)
+Fitur intelijen keamanan baru untuk mendeteksi dan memblokir ancaman jaringan tingkat lanjut:
+
+- **ACS / TR-069 Botnet Detection:** Mendeteksi pola komunikasi dari perangkat yang terinfeksi botnet (Mirai, Mozi) atau protokol manajemen ISP yang tidak diinginkan (ACS).
+- **Crypto Miner Blocking:** Mengidentifikasi dan memblokir trafik ke mining pool cryptocurrency yang memakan resource CPU/Bandwidth pelanggan.
+- **C2 Server Blocking:** Memutus komunikasi antara perangkat terinfeksi dengan Command & Control server peretas.
+- **Actionable Intelligence:** 
+    - **One-Click Block:** Operator dapat langsung memblokir domain berbahaya dari dashboard.
+    - **Safe Blocking:** Pemblokiran ancaman ini **TIDAK** akan memutus koneksi internet pelanggan, hanya memutus jalur komunikasi malware tersebut.
+    - **Recovery:** Domain yang tidak sengaja diblokir dapat dikembalikan (Unblock) melalui menu **Blacklist**.
+
+---
+
+### 6. ANALISIS TRAFIK & MONITORING
 Dashboard Web GUI menyediakan pemantauan real-time yang telah ditingkatkan:
 
 - **Traffic Analysis (Live QPS):**
@@ -79,7 +92,7 @@ Dashboard Web GUI menyediakan pemantauan real-time yang telah ditingkatkan:
 
 ---
 
-### 5. FITUR BARU: RESPONSIVE FULLSCREEN MONITORING
+### 7. FITUR BARU: RESPONSIVE FULLSCREEN MONITORING
 Sistem kini dilengkapi dengan mode pemantauan layar penuh yang adaptif:
 - **Auto-Scale:** Grafik akan menyesuaikan ukurannya secara otomatis mengikuti orientasi dan ukuran layar perangkat.
 - **Mobile Friendly:** Dioptimalkan untuk iPhone dan Android dengan navigasi "Exit Fullscreen" yang mudah.
@@ -87,7 +100,7 @@ Sistem kini dilengkapi dengan mode pemantauan layar penuh yang adaptif:
 
 ---
 
-### 6. BATASAN PERFORMA (ISP SCALE LIMITS)
+### 8. BATASAN PERFORMA (ISP SCALE LIMITS)
 Sistem telah dikonfigurasi ulang untuk menangani topologi NAT dimana satu IP Public mewakili ribuan user:
 
 - **Global Rate Limit:** **100.000 QPS** (Perlindungan level server).
@@ -97,14 +110,20 @@ Sistem telah dikonfigurasi ulang untuk menangani topologi NAT dimana satu IP Pub
 
 ---
 
-### 7. MANAJEMEN WHITELIST & MALWARE
+### 9. MANAJEMEN WHITELIST & MALWARE
 - **Global Whitelist:** IP/Subnet yang ditambahkan ke Whitelist akan melewati (bypass) semua aturan pemblokiran, rate limiting, dan intersepsi.
 - **Malware Shield:** Menggunakan database `/etc/dnsmasq.d/malware.conf` yang diperbarui secara berkala untuk memblokir situs berbahaya.
 
 ---
 
-### 8. PEMELIHARAAN (MAINTENANCE)
-- **Log System:** Sistem secara otomatis melakukan rotasi log untuk mencegah kepenuhan disk.
+### 10. PEMELIHARAAN & KEAMANAN LOG (LOG SAFETY)
+Sistem telah diamankan dari risiko "Disk Full" akibat banjir log (Log Flooding):
+
+- **Auto Log Rotation:** Log sistem (`dnsmasq.log`, `guardian.log`, `nginx`) dikonfigurasi dengan **Logrotate** yang ketat:
+    - **Max Size:** 100MB per file.
+    - **Rotasi:** Maksimal 3 file backup.
+    - **Kompresi:** Log lama otomatis dikompres (.gz) untuk menghemat ruang.
+- **Proteksi Disk Darurat:** Jika disk tetap penuh hingga 90% (misal karena serangan masif), Guardian akan otomatis **menghapus paksa** log lama agar layanan DNS tetap hidup.
 - **Intelligent Self-Healing:** 
     - `guardian.py` secara aktif memonitor port DNS (53/UDP) dan Web GUI (5000/TCP).
     - Jika layanan macet atau mati, Guardian akan mencoba melakukan restart otomatis dan memperbaiki konfigurasi yang korup.
@@ -112,7 +131,7 @@ Sistem telah dikonfigurasi ulang untuk menangani topologi NAT dimana satu IP Pub
 
 ---
 
-### 9. TROUBLESHOOTING WEB GUI
+### 11. TROUBLESHOOTING WEB GUI
 Jika Web GUI tidak dapat diakses:
 
 1. **Pastikan menggunakan HTTPS (bukan HTTP):** `https://IP_SERVER:5000`

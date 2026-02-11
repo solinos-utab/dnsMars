@@ -369,6 +369,9 @@
                         <button onclick="openGuardianModal()" class="text-left px-4 py-3 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-500/30 rounded-xl transition group">
                             <span class="block text-[10px] text-blue-400 font-orbitron">CONFIGURATION</span><span class="text-xs font-bold text-white">GUARDIAN SETTINGS</span>
                         </button>
+                        <button onclick="openACSModal()" class="text-left px-4 py-3 bg-red-900/20 hover:bg-red-900/40 border border-red-500/30 rounded-xl transition group animate-pulse">
+                            <span class="block text-[10px] text-red-400 font-orbitron">INTELLIGENCE</span><span class="text-xs font-bold text-white">⚠ SYSTEM THREAT ANALYSIS</span>
+                        </button>
                     </div>
                 </div>
 
@@ -710,6 +713,54 @@
                 </div>
 
                 <button onclick="saveTrustSchedule()" class="w-full py-3 bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-500 hover:to-green-500 text-white font-orbitron text-[10px] rounded-xl transition shadow-lg shadow-blue-900/20">SAVE SCHEDULE SETTINGS</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACS Analysis Modal -->
+    <div id="acs-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-4xl space-y-6 border border-red-500/30 h-[80vh] flex flex-col">
+            <div class="flex justify-between items-start">
+                <div>
+                    <h2 class="text-2xl font-orbitron text-red-500 mb-2">ADVANCED THREAT DETECTOR</h2>
+                    <p class="text-slate-400 text-xs tracking-widest">DETECTING: BOTNETS, MINERS, C2, TR-069, MALWARE</p>
+                </div>
+                <button onclick="closeACSModal()" class="text-slate-400 hover:text-white">✕</button>
+            </div>
+            
+            <div class="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50 flex-1 overflow-hidden flex flex-col">
+                <div class="flex justify-between items-center mb-4 gap-4">
+                    <div class="relative flex-1">
+                        <input type="text" id="acs-search" onkeyup="filterACSList()" placeholder="Search domain..." class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-red-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-500 absolute right-3 top-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="btn-bulk-block" onclick="blockSelectedACS()" class="hidden px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold rounded-lg transition shadow-lg shadow-red-900/20 font-orbitron">BLOCK SELECTED</button>
+                        <button onclick="loadACSCandidates()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg border border-slate-600 transition">REFRESH</button>
+                    </div>
+                </div>
+                <div class="overflow-y-auto flex-1 pr-2">
+                    <table class="w-full text-left text-xs">
+                        <thead class="text-slate-500 border-b border-slate-700/50 sticky top-0 bg-slate-900 z-10">
+                            <tr>
+                                <th class="pb-2 pl-2 w-8"><input type="checkbox" id="acs-select-all" onclick="toggleSelectAllACS()" class="rounded bg-slate-800 border-slate-600 text-red-600 focus:ring-0 cursor-pointer"></th>
+                                <th class="pb-2 pl-2">DOMAIN</th>
+                                <th class="pb-2 text-center">THREAT TYPE</th>
+                                <th class="pb-2 text-right">HITS</th>
+                                <th class="pb-2 text-right pr-2">ACTION</th>
+                            </tr>
+                        </thead>
+                        <tbody id="acs-table-body" class="text-slate-300 font-mono">
+                            <tr><td colspan="5" class="text-center py-8 text-slate-500">Scanning logs...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="bg-yellow-900/20 border border-yellow-500/20 p-4 rounded-xl">
+                <p class="text-[10px] text-yellow-500">⚠ <strong>WARNING:</strong> Review before blocking. Some domains might be false positives (e.g. legitimate crypto wallets or ISP tools).</p>
             </div>
         </div>
     </div>
@@ -1959,6 +2010,167 @@
         fetchBannedIps();
         fetchSyncInfo();
         setInterval(fetchBannedIps, 10000);
+        // --- ACS BOTNET ANALYSIS ---
+        function openACSModal() {
+            document.getElementById('acs-modal').classList.remove('hidden');
+            loadACSCandidates();
+        }
+
+        function closeACSModal() {
+            document.getElementById('acs-modal').classList.add('hidden');
+        }
+
+        let acsCandidates = []; // Global variable to store current ACS data
+
+        async function loadACSCandidates() {
+            const tbody = document.getElementById('acs-table-body');
+            const searchInput = document.getElementById('acs-search');
+            // Don't clear if user is just typing search
+            if (!searchInput.value) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500 animate-pulse">Scanning logs for threats...</td></tr>';
+            }
+            
+            try {
+                const response = await fetch('/api/botnet/acs');
+                const data = await response.json();
+                
+                if (data.candidates) {
+                    acsCandidates = data.candidates; // Store data
+                    renderACSTable(acsCandidates);
+                } else {
+                    acsCandidates = [];
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500">No active threats detected.</td></tr>';
+                }
+                
+                // Reset bulk UI
+                document.getElementById('acs-select-all').checked = false;
+                updateBulkButton();
+                
+            } catch (error) {
+                console.error('Error loading ACS data:', error);
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-red-500">Scan failed.</td></tr>';
+            }
+        }
+
+        function renderACSTable(data) {
+            const tbody = document.getElementById('acs-table-body');
+            
+            if (data.length > 0) {
+                tbody.innerHTML = data.map(item => `
+                    <tr class="border-b border-slate-800/50 hover:bg-slate-800/30 transition group">
+                        <td class="py-2 pl-2"><input type="checkbox" value="${item.domain}" class="acs-checkbox rounded bg-slate-800 border-slate-600 text-red-600 focus:ring-0 cursor-pointer" onclick="updateBulkButton()"></td>
+                        <td class="py-2 pl-2 text-white">${item.domain}</td>
+                        <td class="py-2 text-center">
+                            <span class="px-2 py-0.5 rounded text-[10px] ${getThreatColor(item.type)}">${item.type}</span>
+                        </td>
+                        <td class="py-2 text-right text-neon-blue">${item.count}</td>
+                        <td class="py-2 text-right pr-2">
+                            <button onclick="blockDomain('${item.domain}')" class="px-3 py-1 bg-red-500/20 text-red-400 text-[10px] rounded hover:bg-red-500/40 transition">BLOCK</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500">No matches found.</td></tr>';
+            }
+        }
+
+        function filterACSList() {
+            const query = document.getElementById('acs-search').value.toLowerCase();
+            const filtered = acsCandidates.filter(item => 
+                item.domain.toLowerCase().includes(query) || 
+                item.type.toLowerCase().includes(query)
+            );
+            renderACSTable(filtered);
+            updateBulkButton();
+        }
+
+        function toggleSelectAllACS() {
+            const masterCheckbox = document.getElementById('acs-select-all');
+            const checkboxes = document.querySelectorAll('.acs-checkbox');
+            checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+            updateBulkButton();
+        }
+
+        function updateBulkButton() {
+            const selectedCount = document.querySelectorAll('.acs-checkbox:checked').length;
+            const btn = document.getElementById('btn-bulk-block');
+            if (selectedCount > 0) {
+                btn.classList.remove('hidden');
+                btn.innerText = `BLOCK (${selectedCount})`;
+            } else {
+                btn.classList.add('hidden');
+            }
+        }
+
+        async function blockSelectedACS() {
+            const checkboxes = document.querySelectorAll('.acs-checkbox:checked');
+            const domains = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (domains.length === 0) return;
+            
+            if (!confirm(`Confirm blocking ${domains.length} domains? This will restart DNS services.`)) return;
+            
+            const btn = document.getElementById('btn-bulk-block');
+            const originalText = btn.innerText;
+            btn.innerText = "PROCESSING...";
+            btn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/block', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({domains: domains})
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    alert('Bulk blocking successful!');
+                    // Clear search
+                    document.getElementById('acs-search').value = '';
+                    loadACSCandidates(); 
+                    updateMetrics();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (error) {
+                console.error(error);
+                alert('Connection error or server restarting...');
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        function getThreatColor(type) {
+            if (type.includes('ACS')) return 'bg-purple-500/20 text-purple-400';
+            if (type.includes('MINER')) return 'bg-yellow-500/20 text-yellow-400';
+            if (type.includes('C2')) return 'bg-red-500/20 text-red-400';
+            return 'bg-slate-700 text-slate-400';
+        }
+
+        async function blockDomain(domain) {
+            if (!confirm(`Block ${domain} permanently?`)) return;
+            
+            try {
+                const response = await fetch('/api/block', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({domain: domain})
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    alert('Domain blocked successfully!');
+                    loadACSCandidates(); // Refresh list
+                    updateMetrics(); // Update main stats (replaced fetchStats)
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (error) {
+                console.error(error);
+                alert('Connection error or server restarting...');
+            }
+        }
     </script>
 </body>
 </html>

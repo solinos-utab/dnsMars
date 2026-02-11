@@ -95,6 +95,132 @@ def sync_config():
 def is_authenticated():
     return session.get('authenticated', False)
 
+@app.route('/api/botnet/acs')
+def get_acs_candidates():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Load Blacklist to filter results
+    blacklist = set()
+    try:
+        if os.path.exists('/etc/dnsmasq.d/blacklist.conf'):
+            with open('/etc/dnsmasq.d/blacklist.conf', 'r') as f:
+                for line in f:
+                    # Format: address=/domain/ip
+                    match = re.search(r'address=/(.*?)/', line)
+                    if match:
+                        blacklist.add(match.group(1).lower())
+    except:
+        pass
+
+    candidates = {}
+    try:
+        # Extended Regex for comprehensive Botnet/Threat Detection
+        # Includes: ACS/TR069, Mining Pools, C2 Servers, Malware Loaders, DDoS Tools
+        regex_pattern = "(acs|tr069|cwmp|soap|mirai|mozi|botnet|cnc\\.|loader|miner|pool\\.|crypto|wallet|tor\\.|onion\\.|trojan|ransom|payload|gate\\.|panel\\.)"
+        
+        # Increased log depth to 3000 lines for better detection rate
+        cmd = f"grep -Ei 'query\\[A\\] .*{regex_pattern}' /var/log/dnsmasq.log | tail -n 3000 | awk '{{print $6}}' | sort | uniq -c | sort -nr | head -n 50"
+        
+        output = subprocess.check_output(cmd, shell=True).decode('utf-8')
+        
+        results = []
+        for line in output.split('\n'):
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                count = parts[0]
+                domain = parts[1]
+                
+                # Skip if already blacklisted
+                if domain.lower() in blacklist:
+                    continue
+
+                # Determine Threat Type
+                threat_type = "UNKNOWN"
+                domain_lower = domain.lower()
+                if any(x in domain_lower for x in ['acs', 'tr069', 'cwmp', 'soap', 'telekom']):
+                    threat_type = "ACS/TR-069 (Botnet)"
+                elif any(x in domain_lower for x in ['pool', 'mine', 'crypto', 'wallet', 'xmr', 'eth']):
+                    threat_type = "CRYPTO MINER"
+                elif any(x in domain_lower for x in ['cnc', 'control', 'bot', 'mirai', 'mozi', 'panel', 'gate']):
+                    threat_type = "C2 / BOTNET"
+                else:
+                    threat_type = "SUSPICIOUS"
+
+                results.append({'domain': domain, 'count': count, 'type': threat_type})
+                
+        return jsonify({'candidates': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/block', methods=['POST'])
+def block_domain_endpoint():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    data = request.json
+    
+    # Handle single domain or bulk domains
+    domains_to_block = []
+    
+    if 'domains' in data and isinstance(data['domains'], list):
+        domains_to_block = data['domains']
+    elif 'domain' in data:
+        domains_to_block = [data['domain']]
+    
+    if not domains_to_block:
+        return jsonify({'status': 'error', 'message': 'No domains provided'}), 400
+        
+    server_ip = get_server_ip()
+    blocked_count = 0
+    
+    try:
+        # Read existing blacklist to avoid duplicates
+        existing_blacklist = set()
+        if os.path.exists('/etc/dnsmasq.d/blacklist.conf'):
+            with open('/etc/dnsmasq.d/blacklist.conf', 'r') as f:
+                existing_blacklist = set(line.strip() for line in f)
+
+        new_entries = []
+        for domain in domains_to_block:
+            domain = domain.strip()
+            if not domain: continue
+            
+            # Sanitize
+            domain = re.sub(r'[^a-zA-Z0-9.-]', '', domain)
+            
+            entry = f"address=/{domain}/{server_ip}"
+            
+            # Check if already exists in file content or new entries
+            is_duplicate = False
+            for existing in existing_blacklist:
+                if f"/{domain}/" in existing:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                new_entries.append(entry)
+                blocked_count += 1
+
+        if not new_entries:
+             return jsonify({'status': 'success', 'message': 'All domains were already blocked'})
+
+        # Append all new entries at once
+        with open('/etc/dnsmasq.d/blacklist.conf', 'a') as f:
+            f.write('\n' + '\n'.join(new_entries) + '\n')
+        
+        # Use background restart to prevent browser timeout
+        success, msg = safe_service_restart(background=True)
+        if not success:
+            # Revert changes if config invalid (complex for bulk, but we try)
+            # For bulk, we might just return error, but let's try to remove added lines
+            # This is risky, so we rely on safe_service_restart pre-check mostly.
+            return jsonify({'status': 'error', 'message': msg})
+            
+        return jsonify({'status': 'success', 'message': f'{blocked_count} domains blocked successfully'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
@@ -743,10 +869,11 @@ def get_service_status(service_name):
 def run_command(command, timeout=30):
     return subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
 
-def safe_service_restart():
+def safe_service_restart(background=False):
     """
     ISP-Scale Safety: Test configurations before restarting services.
     If a config is invalid, do NOT restart and return the error.
+    Optionally restart in background to avoid HTTP timeouts.
     """
     # 1. Test Dnsmasq
     test_dnsmasq = run_command("sudo dnsmasq --test")
@@ -759,9 +886,18 @@ def safe_service_restart():
         return False, f"Unbound config error: {test_unbound.stderr.strip()}"
     
     # 3. Restart if all good
-    run_command("sudo systemctl restart dnsmasq")
-    run_command("sudo systemctl restart unbound")
-    return True, "Services restarted successfully"
+    if background:
+        def restart_task():
+            # Add small delay to allow response to be sent
+            time.sleep(0.5)
+            run_command("sudo systemctl restart dnsmasq")
+            run_command("sudo systemctl restart unbound")
+        threading.Thread(target=restart_task).start()
+        return True, "Services restarting in background"
+    else:
+        run_command("sudo systemctl restart dnsmasq")
+        run_command("sudo systemctl restart unbound")
+        return True, "Services restarted successfully"
 
 @app.route('/health')
 def health():

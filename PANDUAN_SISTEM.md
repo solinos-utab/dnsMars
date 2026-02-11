@@ -80,9 +80,12 @@ Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani
     - **Apple Services:** Whitelist domain infrastruktur DNS Apple (`apple-dns.net`, `apple-dns.cn`) untuk kelancaran iCloud dan iTunes.
     - **Xiaomi/MiCloud:** Whitelist domain API, IoT, dan Game Center (`api.jr.mi.com`, `idm.iot.mi.com`, `migc.g.mi.com`) untuk sinkronisasi MiCloud dan layanan Xiaomi.
 - **High Load Tracker Optimization (Null Route):**
-    - Domain tracker yang menghasilkan beban CPU tinggi (misal: `pangle.io`, `kwai-pro.com`) kini di-route ke `0.0.0.0` (Null Route).
-    - Mencegah server Nginx terbebani oleh ribuan request HTTPS background dari aplikasi mobile.
-    - Menghemat penggunaan CPU hingga 50% pada beban trafik tinggi.
+        - Domain tracker yang menghasilkan beban CPU tinggi (misal: `pangle.io`, `kwai-pro.com`) kini di-route ke `0.0.0.0` (Null Route).
+        - Mencegah server Nginx terbebani oleh ribuan request HTTPS background dari aplikasi mobile.
+        - Menghemat penggunaan CPU hingga 50% pada beban trafik tinggi.
+    - **High Performance Logging (RAM):**
+        - Log dnsmasq kini dipindahkan ke `/run/dnsmasq.log` (RAM Disk) untuk menghilangkan bottleneck I/O disk.
+        - Memungkinkan pencatatan statistik (QPS) tetap aktif tanpa memperlambat browsing, bahkan saat trafik analitik tinggi.
 
 ---
 

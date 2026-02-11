@@ -139,7 +139,10 @@ def analyze_threat_candidates():
         regex_pattern = "(" + "|".join(all_patterns) + ")"
         
         # Increased log depth to 3000 lines for better detection rate
-        cmd = f"grep -Ei 'query\\[A\\] .*{regex_pattern}' /var/log/dnsmasq.log | tail -n 3000 | awk '{{print $6}}' | sort | uniq -c | sort -nr | head -n 50"
+        # Grep for pipe | must be escaped as \| in regex or used with -F for fixed strings, 
+        # but here we use -E (extended regex). The domain contains '|' which is a special char in regex.
+        # We need to ensure the grep command correctly captures domains with special chars.
+        cmd = f"grep -Ei 'query\\[A\\] .*{regex_pattern}' /run/dnsmasq.log | tail -n 3000 | awk '{{print $6}}' | sort | uniq -c | sort -nr | head -n 50"
         
         output = subprocess.check_output(cmd, shell=True).decode('utf-8')
         
@@ -149,8 +152,20 @@ def analyze_threat_candidates():
                 count = parts[0]
                 domain = parts[1]
                 
+                # Sanitize domain for display but keep original for matching
+                # Some domains might have weird chars that break things
+                
                 # Skip if already blacklisted
+                # IMPORTANT: Check if the domain is already in blacklist (exact match or subdomain)
+                is_blacklisted = False
                 if domain.lower() in blacklist:
+                     is_blacklisted = True
+                
+                # Also check if it's already blocked by existing rules (partial match in blacklist file)
+                # But here we only have the set of exact domains. 
+                # Ideally we should trust the blacklist set populated earlier.
+                
+                if is_blacklisted:
                     continue
 
                 # Determine Threat Type
@@ -160,6 +175,7 @@ def analyze_threat_candidates():
                 # Check custom keywords first
                 keyword_match = False
                 for kw in custom_keywords:
+                    # Simple substring match might fail if domain has special chars not handled well
                     if kw.lower() in domain_lower:
                         threat_type = f"KEYWORD BLOCK ({kw})"
                         keyword_match = True
@@ -250,7 +266,8 @@ def block_domains_internal(domains_to_block):
             if not domain: continue
             
             # Sanitize
-            domain = re.sub(r'[^a-zA-Z0-9.-]', '', domain)
+            # Allow pipe | for some botnet domains, but be careful
+            domain = re.sub(r'[^a-zA-Z0-9.\-\|]', '', domain)
             
             entry = f"address=/{domain}/{server_ip}"
             
@@ -328,8 +345,10 @@ def auto_block_worker():
     while True:
         try:
             config = get_autoblock_config()
-            # If no config is enabled, skip analysis
-            if not any(config.values()):
+            keywords = get_threat_keywords()
+            
+            # If no config is enabled AND no keywords defined, skip analysis
+            if not any(config.values()) and not keywords:
                 time.sleep(600) # Sleep 10 mins
                 continue
                 
@@ -342,7 +361,8 @@ def auto_block_worker():
                 domain = item['domain']
                 
                 # Check if this threat type is enabled for auto-blocking
-                if config.get(threat_type, False):
+                # OR if it matches a custom keyword (always auto-block keywords)
+                if config.get(threat_type, False) or threat_type.startswith("KEYWORD BLOCK"):
                     domains_to_block.append(domain)
             
             if domains_to_block:
@@ -540,7 +560,7 @@ def get_traffic_stats():
         
         # Increase tail for ISP scale (200k lines handles up to 40k QPS over 5s)
         # Assuming avg 20k QPS * 5s = 100k lines. Using 200k for safety margin.
-        cmd = "sudo tail -n 200000 /var/log/dnsmasq.log | grep 'query\\['"
+        cmd = "sudo tail -n 200000 /run/dnsmasq.log | grep 'query\\['"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
@@ -579,7 +599,7 @@ def get_per_ip_traffic_stats(limit=20):
     Returns: {ip: queries, rate_limit_status}
     """
     try:
-        cmd = f"sudo tail -n 50000 /var/log/dnsmasq.log | grep 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        cmd = f"sudo tail -n 50000 /run/dnsmasq.log | grep 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
@@ -621,12 +641,12 @@ def get_servfail_stats(limit=5):
     """
     try:
         # Get total queries in recent logs
-        cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
+        cmd_total = "sudo tail -n 100000 /run/dnsmasq.log | grep 'query\\[' | wc -l"
         total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         total_queries = int(total_result) if total_result else 1
         
         # Get SERVFAIL errors by domain
-        cmd = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep 'reply is SERVFAIL' | awk '{{print $8}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        cmd = f"sudo tail -n 100000 /run/dnsmasq.log | grep 'reply is SERVFAIL' | awk '{{print $8}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
@@ -662,13 +682,13 @@ def get_blocklist_stats(limit=10):
     """
     try:
         # Get total queries
-        cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
+        cmd_total = "sudo tail -n 100000 /run/dnsmasq.log | grep 'query\\[' | wc -l"
         total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         total_queries = int(total_result) if total_result else 1
         
         # Find blocked domains (queries that were denied/replied with NXDOMAIN or 0.0.0.0)
         # dnsmasq marks blocked queries with specific patterns in logs
-        cmd = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -E 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        cmd = f"sudo tail -n 100000 /run/dnsmasq.log | grep -E 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
@@ -680,7 +700,7 @@ def get_blocklist_stats(limit=10):
         
         # Match "config domain is IP" or "reply domain is IP"
         # We look for 0.0.0.0, 127.0.0.1, or the Server IP (for block page redirect)
-        cmd_blocked = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -E 'config|reply' | grep -E ' is (0\\.0\\.0\\.0|127\\.0\\.0\\.1|{server_ip_esc})$' | awk '{{print $6}}' | sort | uniq -c | sort -rn | head -n {limit}"
+        cmd_blocked = f"sudo tail -n 100000 /run/dnsmasq.log | grep -E 'config|reply' | grep -E ' is (0\\.0\\.0\\.0|127\\.0\\.0\\.1|{server_ip_esc})$' | awk '{{print $6}}' | sort | uniq -c | sort -rn | head -n {limit}"
         blocked_result = subprocess.run(cmd_blocked, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         blocklist_data = []
@@ -1431,7 +1451,8 @@ def action():
     
     # Sanitize domain
     if domain:
-        domain = re.sub(r'[^a-zA-Z0-9.-]', '', domain)
+        # Allow pipe | for complex botnet domains
+        domain = re.sub(r'[^a-zA-Z0-9.\-\|]', '', domain)
     
     # Sanitize IPs
     if dns_ip:
@@ -1480,39 +1501,62 @@ def action():
         success, msg = safe_service_restart()
         if not success:
             return jsonify({'status': 'error', 'message': msg})
-    elif cmd_type == 'blacklist' and domain:
-        # Redirect to 0.0.0.0 or Server IP
+    elif cmd_type == 'blacklist':
+        domains = data.get('domains', [])
+        if domain:
+            domains.append(domain)
+            
+        if not domains:
+             return jsonify({'status': 'error', 'message': 'No domain provided'})
+
         action_val = data.get('action', 'add')
+        
         if action_val == 'add':
-            server_ip = get_server_ip()
-            run_command(f"echo 'address=/{domain}/{server_ip}' | sudo tee -a /etc/dnsmasq.d/blacklist.conf")
+            count, msg = block_domains_internal(domains)
+            if count == 0 and "already" not in msg:
+                return jsonify({'status': 'error', 'message': msg})
         elif action_val == 'remove':
-            # Use a more flexible regex to remove the domain regardless of the IP it points to
-            run_command(f"sudo sed -i '/address=\/{domain}\//d' /etc/dnsmasq.d/blacklist.conf")
+            # Bulk remove
+            for d in domains:
+                d = re.sub(r'[^a-zA-Z0-9.\-\|]', '', d) # Sanitize
+                if d:
+                    run_command(f"sudo sed -i '/address=\/{d}\//d' /etc/dnsmasq.d/blacklist.conf")
         
         success, msg = safe_service_restart()
         if not success:
             return jsonify({'status': 'error', 'message': msg})
-        return jsonify({'status': 'success', 'message': f'Domain {domain} {"blacklisted" if action_val=="add" else "removed from blacklist"}'})
+        return jsonify({'status': 'success', 'message': f'Processed {len(domains)} domains for blacklist'})
 
-    elif cmd_type == 'whitelist' and domain:
+    elif cmd_type == 'whitelist':
+        domains = data.get('domains', [])
+        if domain:
+            domains.append(domain)
+
+        if not domains:
+             return jsonify({'status': 'error', 'message': 'No domain provided'})
+
         action_val = data.get('action', 'add')
-        if action_val == 'add':
-            # 1. Remove from blacklist if exists
-            blacklist_path = "/etc/dnsmasq.d/blacklist.conf"
-            if os.path.exists(blacklist_path):
-                run_command(f"sudo sed -i '/address=\/{domain}\//d' {blacklist_path}")
+        
+        for d in domains:
+            d = re.sub(r'[^a-zA-Z0-9.\-\|]', '', d) # Sanitize
+            if not d: continue
             
-            # 2. Add to whitelist.conf with a stable public DNS (8.8.8.8)
-            run_command(f"echo 'server=/{domain}/8.8.8.8' | sudo tee -a /etc/dnsmasq.d/whitelist.conf")
-        elif action_val == 'remove':
-            run_command(f"sudo sed -i '/server=\/{domain}\//d' /etc/dnsmasq.d/whitelist.conf")
+            if action_val == 'add':
+                # 1. Remove from blacklist if exists
+                blacklist_path = "/etc/dnsmasq.d/blacklist.conf"
+                if os.path.exists(blacklist_path):
+                    run_command(f"sudo sed -i '/address=\/{d}\//d' {blacklist_path}")
+                
+                # 2. Add to whitelist.conf with a stable public DNS (8.8.8.8)
+                run_command(f"echo 'server=/{d}/8.8.8.8' | sudo tee -a /etc/dnsmasq.d/whitelist.conf")
+            elif action_val == 'remove':
+                run_command(f"sudo sed -i '/server=\/{d}\//d' /etc/dnsmasq.d/whitelist.conf")
             
         # 3. Restart services safely
         success, msg = safe_service_restart()
         if not success:
             return jsonify({'status': 'error', 'message': msg})
-        return jsonify({'status': 'success', 'message': f'Domain {domain} {"whitelisted" if action_val=="add" else "removed from whitelist"}'})
+        return jsonify({'status': 'success', 'message': f'Processed {len(domains)} domains for whitelist'})
     elif cmd_type == 'update_ssh':
         run_command("sudo apt-get update && sudo apt-get install --only-upgrade openssh-server -y")
     elif cmd_type == 'update_firewall':
@@ -1705,7 +1749,7 @@ def logs():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
     # Get last 20 lines of dnsmasq logs
-    proc = run_command("sudo tail -n 20 /var/log/dnsmasq.log")
+    proc = run_command("sudo tail -n 20 /run/dnsmasq.log")
     logs = (proc.stdout or '').strip() if proc else ''
     return jsonify({'logs': logs})
 

@@ -76,6 +76,7 @@ Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani
     - **SnackVideo:** Whitelist domain API dan Open Platform (`kwaizt.com`) untuk stabilitas aplikasi.
     - **Akamai:** Whitelist domain Analytics (`akamai.tt.omtrdc.net`) untuk mencegah gangguan pada layanan pihak ketiga yang menggunakan Akamai.
     - **Google Play Services:** Whitelist domain Metrics, Telemetry, & Crashlytics (`clientmetrics`, `telemetry`, `firebasecrashlytics`, `admob`) untuk mengatasi masalah loading lambat pada Play Store dan aplikasi Android.
+    - **Global Analytics & Error Tracking:** Whitelist `app-measurement.com` (Google) dan `sentry.io` yang sering menyebabkan aplikasi (termasuk Roblox) menjadi lambat atau gagal memuat fitur chat jika diblokir.
     - **Apple Services:** Whitelist domain infrastruktur DNS Apple (`apple-dns.net`, `apple-dns.cn`) untuk kelancaran iCloud dan iTunes.
     - **Xiaomi/MiCloud:** Whitelist domain API, IoT, dan Game Center (`api.jr.mi.com`, `idm.iot.mi.com`, `migc.g.mi.com`) untuk sinkronisasi MiCloud dan layanan Xiaomi.
 - **High Load Tracker Optimization (Null Route):**

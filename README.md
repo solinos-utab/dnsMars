@@ -23,7 +23,7 @@ Sistem DNS yang dioptimalkan untuk ISP dengan topologi NAT skala besar, mampu me
 - **Compliance:** Pemblokiran konten negatif sesuai regulasi.
 - **Smart Redirect:** Intersepsi HTTPS yang mulus ke halaman blokir.
 - **False Positive Fix:** Whitelist otomatis untuk `connectivitycheck` Android/iOS (Anti-Captive Portal issue).
-- **App Optimization:** Whitelist khusus untuk Roblox (Gameplay Fix), WhatsApp, YouTube, Shopee, TikTok, SnackVideo, Akamai, dan Google Play Services agar berjalan lancar tanpa terblokir filter ads/malware.
+- **App Optimization:** Whitelist khusus untuk Roblox (Gameplay Fix), WhatsApp, YouTube, Shopee, TikTok, SnackVideo, Akamai, Google Play Services, Apple (iCloud/iTunes), dan Xiaomi (MiCloud) agar berjalan lancar tanpa terblokir filter ads/malware.
 
 ### 4. Keamanan & Stabilitas
 - **Log Safety:** Rotasi log otomatis (Max 50MB) mencegah disk penuh.

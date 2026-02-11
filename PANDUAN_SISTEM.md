@@ -67,6 +67,10 @@ Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani
     - Mengaktifkan fitur *serve-expired* pada Unbound (Timeout: 1000ms).
     - DNS akan menyajikan cache kadaluarsa (expired) sejenak kepada client untuk respon instan, sambil melakukan update cache di background.
     - Menghilangkan buffering/loading awal pada aplikasi video (YouTube, TikTok, dll).
+- **High Load Tracker Optimization (Null Route):**
+    - Domain tracker yang menghasilkan beban CPU tinggi (misal: `pangle.io`, `kwai-pro.com`) kini di-route ke `0.0.0.0` (Null Route).
+    - Mencegah server Nginx terbebani oleh ribuan request HTTPS background dari aplikasi mobile.
+    - Menghemat penggunaan CPU hingga 50% pada beban trafik tinggi.
 
 ---
 

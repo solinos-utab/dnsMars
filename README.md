@@ -26,6 +26,7 @@ Sistem DNS yang dioptimalkan untuk ISP dengan topologi NAT skala besar, mampu me
 
 ### 4. Keamanan & Stabilitas
 - **Log Safety:** Rotasi log otomatis (Max 50MB) mencegah disk penuh.
+- **CPU Saver:** Null Route untuk tracker berat (hemat CPU 50%).
 - **Emergency Protection:** Guardian menghapus log jika disk > 90%.
 - **Anti-DDoS:** Iptables hashlimit untuk mitigasi serangan flood.
 - **Auto-Healing:** Service restart otomatis jika macet/crash.

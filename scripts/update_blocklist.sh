@@ -50,7 +50,30 @@ sort "/tmp/malware_raw" | uniq > "/tmp/malware_sorted"
 
 # Comm -23: Lines in malware_sorted but NOT in porn_sorted
 # This ensures Malware list does NOT contain any domain present in the Porn list
-comm -23 "/tmp/malware_sorted" "/tmp/porn_sorted" > "/tmp/malware_final"
+comm -23 "/tmp/malware_sorted" "/tmp/porn_sorted" > "/tmp/malware_no_porn"
+
+# --- 3.5 FILTER OUT WHITELIST DOMAINS ---
+# Critical step to prevent False Positive Block Pages on Android/Xiaomi/Vivo/Oppo
+WHITELIST_FILE="/home/dns/dnsMars/whitelist_domains.txt"
+if [ -f "$WHITELIST_FILE" ]; then
+    echo "[$(date)] Applying whitelist filter..."
+    
+    # Sanitize whitelist: remove comments and empty lines
+    sed '/^#/d; /^$/d' "$WHITELIST_FILE" > "/tmp/whitelist_clean"
+    
+    # Filter out domains present in sanitized whitelist
+    # grep -v -F -f ensures strict string matching exclusion
+    if [ -s "/tmp/whitelist_clean" ]; then
+        grep -v -F -f "/tmp/whitelist_clean" "/tmp/malware_no_porn" > "/tmp/malware_final"
+        rm -f "/tmp/whitelist_clean"
+    else
+        echo "[$(date)] Warning: Whitelist is empty after cleaning!"
+        mv "/tmp/malware_no_porn" "/tmp/malware_final"
+    fi
+else
+    echo "[$(date)] Warning: Whitelist file not found! Skipping filter."
+    mv "/tmp/malware_no_porn" "/tmp/malware_final"
+fi
 
 # --- 4. DEPLOY MALWARE LIST ---
 if [ -s "/tmp/malware_final" ]; then

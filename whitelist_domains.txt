@@ -1,0 +1,31 @@
+# Critical OS Connectivity Domains (Prevent False Positive Block Page)
+# Google / Android
+firebaselogging.googleapis.com
+firebaselogging-pa.googleapis.com
+federatedcompute-pa.googleapis.com
+connectivitycheck.gstatic.com
+android.clients.google.com
+clients3.google.com
+
+# Xiaomi / MIUI
+xiaomi.com
+miui.com
+xiaomi.net
+
+# Oppo / Realme / OnePlus
+heytapmobi.com
+heytapmobile.com
+oppomobile.com
+
+# Vivo
+vivoglobal.com
+vivo.com
+
+# Windows / Microsoft
+msftconnecttest.com
+msftncsi.com
+
+# Apple
+apple.com
+icloud.com
+mzstatic.com

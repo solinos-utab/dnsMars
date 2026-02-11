@@ -1,85 +1,147 @@
 <!DOCTYPE html>
-<html lang="en">
+<html xmlns="http://www.w3.org/1999/xhtml" lang xml:lang>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DNS Mars - User Manual</title>
-    <style>
-        body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; color: #333; }
-        h1 { color: #2563eb; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-        h2 { color: #1e40af; margin-top: 30px; }
-        h3 { color: #1e3a8a; }
-        code { background: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-family: monospace; }
-        pre { background: #1e293b; color: #fff; padding: 15px; border-radius: 8px; overflow-x: auto; }
-        .note { background: #eff6ff; border-left: 4px solid #2563eb; padding: 15px; margin: 20px 0; }
-        .warning { background: #fef2f2; border-left: 4px solid #ef4444; padding: 15px; margin: 20px 0; }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>DNS Mars - User Manual</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+  </style>
+  <style>body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; color: #333; } h1 { color: #2563eb; border-bottom: 2px solid #eee; padding-bottom: 10px; } h2 { color: #1e40af; margin-top: 30px; } h3 { color: #1e3a8a; } code { background: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-family: monospace; } pre { background: #1e293b; color: #fff; padding: 15px; border-radius: 8px; overflow-x: auto; } .note { background: #eff6ff; border-left: 4px solid #2563eb; padding: 15px; margin: 20px 0; } .warning { background: #fef2f2; border-left: 4px solid #ef4444; padding: 15px; margin: 20px 0; }</style>
 </head>
 <body>
-    <h1>DNS Mars - User Manual</h1>
-    <p><strong>Version:</strong> 2.0 (Recursive Edition)</p>
-    <p><strong>Last Updated:</strong> 2026-02-10</p>
-
-    <h2>1. System Overview</h2>
-    <p>DNS Mars is a high-performance DNS resolver designed for ISPs. It uses a <strong>Recursive Architecture</strong>, meaning it resolves domain names directly from root servers without relying on third-party upstreams like Google or Cloudflare. This ensures maximum privacy and independence.</p>
-
-    <h2>2. Web Management GUI</h2>
-    <p>Access the GUI at: <code>https://YOUR_SERVER_IP:5000/</code></p>
-    
-    <h3>Key Features:</h3>
-    <ul>
-        <li><strong>DNS Trust (Internet Positif):</strong> Toggle this switch to Enable/Disable blocking of regulated content.
-            <ul>
-                <li><strong>Enable:</strong> Blocks gambling/porn domains (compliance mode).</li>
-                <li><strong>Disable:</strong> Unblocks regulated content (for testing/special use).</li>
-                <li><em>Note: Malware blocking remains active regardless of this setting.</em></li>
-            </ul>
-        </li>
-        <li><strong>Flush Cache:</strong> Clears DNS cache immediately. Use this if a domain is not resolving correctly or has changed IP recently.</li>
-        <li><strong>Restart Services:</strong> Safely restarts Dnsmasq and Unbound.</li>
-    </ul>
-
-    <h2>3. Self-Healing Guardian</h2>
-    <p>The system runs an intelligent background service called <strong>Guardian</strong>.</p>
-    <div class="note">
-        <strong>What it does:</strong>
-        <ul>
-            <li>Checks DNS health every 10 seconds.</li>
-            <li>Automatically repairs broken services.</li>
-            <li>Updates firewall rules if the server IP changes.</li>
-        </ul>
-    </div>
-
-    <h2>4. Troubleshooting</h2>
-    
-    <h3>High Disk Usage?</h3>
-    <p>If the server disk fills up (logs can grow large):</p>
-    <ul>
-        <li><strong>Symptom:</strong> DNS stops working, Web GUI sluggish.</li>
-        <li><strong>Fix:</strong> Logs are now automatically rotated. If critical, run:</li>
-    </ul>
-    <pre>
-sudo truncate -s 0 /var/log/dnsmasq.log
-sudo systemctl restart dnsmasq
-    </pre>
-
-    <h3>Client Cannot Browse?</h3>
-    <ol>
-        <li>Check if the client's DNS IP is set to this server's IP.</li>
-        <li>Try flushing the cache via the Web GUI.</li>
-        <li>Check the "System Load" on the dashboard.</li>
-    </ol>
-
-    <h3>Google DNS Leaking?</h3>
-    <p>The system is configured to block forwarding to 8.8.8.8. If you see Google DNS in a leak test:</p>
-    <ul>
-        <li>Check your browser's "Secure DNS" (DoH) settings and disable them.</li>
-        <li>Ensure your router isn't forcing a secondary DNS.</li>
-    </ul>
-
-    <h2>5. Backup & Restore</h2>
-    <p>The system automatically backs up configuration to GitHub.</p>
-    <pre>/home/dns/dnsMars/scripts/backup_to_github.sh</pre>
-
+<header id="title-block-header">
+<h1 class="title">DNS Mars - User Manual</h1>
+</header>
+<h1 id="buku-panduan-sistem---pt-mars-data-telekomunikasi">BUKU PANDUAN SISTEM - PT MARS DATA TELEKOMUNIKASI</h1>
+<h2 id="dual-stack-dns-engine-isp-scale-edition">DUAL STACK DNS ENGINE (ISP SCALE EDITION)</h2>
+<p>Dokumentasi ini berisi panduan operasional dan teknis untuk sistem DNS Mars Data yang telah dioptimalkan untuk skala ISP dengan topologi NAT.</p>
+<hr />
+<h3 id="ringkasan-sistem">1. RINGKASAN SISTEM</h3>
+<p>Sistem ini menggunakan arsitektur <strong>Hybrid DNS High Performance</strong> yang menggabungkan kecepatan <strong>dnsmasq</strong> dengan keamanan serta rekursi tingkat tinggi dari <strong>Unbound</strong>.</p>
+<ul>
+<li><strong>DNS Engine:</strong> Hybrid (dnsmasq + Unbound) - Tuned for High Concurrency.</li>
+<li><strong>Security:</strong> Anti-DDoS (iptables Hashlimit), Malware Shield (100k+ domains), Intelligent Self-Healing Guardian.</li>
+<li><strong>Web GUI:</strong> Management Dashboard berbasis Flask dengan antarmuka modern dan responsif.</li>
+<li><strong>Topologi:</strong> Mendukung <strong>NAT Topology</strong> (Ribuan user dibalik satu IP Public) dengan manajemen koneksi yang efisien.</li>
+</ul>
+<hr />
+<h3 id="dns-trust-internet-positif">2. DNS TRUST &amp; INTERNET POSITIF</h3>
+<p>Fitur ini dirancang untuk mematuhi regulasi pemblokiran konten negatif (Internet Positif) dengan pengalaman pengguna yang mulus.</p>
+<ul>
+<li><strong>HTTPS Redirect:</strong> Sistem kini mendukung redirect otomatis dari akses HTTPS ke domain terblokir menuju halaman blokir HTTP (via 302 Redirect) setelah user melewati peringatan SSL.</li>
+<li><strong>Cara Kerja:</strong> Sistem secara otomatis mencegat trafik DNS dan HTTP/HTTPS melalui firewall (NAT) untuk mengarahkan domain terblokir ke halaman peringatan internal.</li>
+<li><strong>Konfigurasi Utama:</strong> <code>/etc/dnsmasq.d/smartdns.conf</code> (Single Source of Truth).</li>
+<li><strong>Status:</strong> Jika DNS Trust “Enabled”, pemblokiran aktif. Jika “Disabled”, sistem tetap melakukan intersepsi namun dengan aturan yang lebih longgar.</li>
+<li><strong>Guardian:</strong> Layanan <code>guardian.py</code> memastikan aturan firewall tetap aktif meskipun sistem direstart.</li>
+</ul>
+<h4 id="captive-portal-bypass-false-positive-fix">Captive Portal Bypass (False Positive Fix)</h4>
+<p>Untuk mencegah perangkat (Android/iOS) mendeteksi jaringan sebagai “Captive Portal” palsu yang menyebabkan popup “Sign in to network” muncul terus-menerus:</p>
+<ul>
+<li><strong>Mechanism:</strong> Whitelisting domain connectivity check (misal: <code>connectivitycheck.gstatic.com</code>, <code>android.clients.google.com</code>) agar resolve ke IP asli via Unbound, bukan ke IP Block Page.</li>
+<li><strong>Config:</strong> <code>/etc/dnsmasq.d/captive_portal.conf</code></li>
+<li><strong>Domains Covered:</strong> Android (Google), iOS (Apple), Windows, Firefox.</li>
+<li><strong>Benefit:</strong> User tidak akan melihat halaman blokir Internet Positif saat baru terkoneksi ke WiFi, kecuali mereka benar-benar mengakses konten terlarang.</li>
+</ul>
+<hr />
+<h3 id="proteksi-disk-darurat-new">3. PROTEKSI DISK DARURAT (NEW)</h3>
+<p>Guardian System kini dilengkapi dengan <strong>Emergency Disk Protection</strong> untuk mencegah kegagalan sistem akibat log yang membanjir:</p>
+<ul>
+<li><strong>Monitoring Real-time:</strong> Guardian memantau penggunaan disk root (<code>/</code>) setiap 10 detik.</li>
+<li><strong>Critical Threshold:</strong> Jika penggunaan disk mencapai <strong>90%</strong>, sistem akan masuk mode darurat.</li>
+<li><strong>Auto-Cleanup:</strong>
+<ul>
+<li>Log aktif (<code>dnsmasq.log</code>, <code>access.log</code>) akan langsung di-truncate (dikosongkan) menjadi 0 byte.</li>
+<li>File log arsip (<code>.gz</code>, <code>.1</code>) akan dihapus paksa.</li>
+<li>Mencegah server crash atau Unbound gagal start karena kehabisan ruang disk.</li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="mitigasi-serangan-internal-stabilitas">4. MITIGASI SERANGAN INTERNAL &amp; STABILITAS</h3>
+<p>Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani ancaman kestabilan:</p>
+<ul>
+<li><strong>Anti-Looping:</strong> Dnsmasq dan Unbound dikonfigurasi untuk mendeteksi DNS forwarding loops.</li>
+<li><strong>Memory Leak &amp; Swap Thrashing:</strong>
+<ul>
+<li>Guardian memantau penggunaan RAM dan Swap.</li>
+<li>Jika RAM &gt; 90% dan Swap penuh (Thrashing), layanan DNS akan direstart otomatis untuk membebaskan memori sebelum sistem hang (OOM).</li>
+</ul></li>
+<li><strong>UDP Drop Prevention:</strong>
+<ul>
+<li>Kernel buffer (<code>rmem_default</code>, <code>rmem_max</code>) ditingkatkan hingga 16MB untuk mencegah paket loss saat traffic tinggi.</li>
+</ul></li>
+<li><strong>IRQ Overload:</strong> Menggunakan <code>irqbalance</code> untuk mendistribusikan beban interupsi jaringan ke semua core CPU.</li>
+<li><strong>Botnet Mitigation:</strong> Rate limit per-IP (20.000 QPS) mencegah satu botnet yang terinfeksi melumpuhkan seluruh server.</li>
+</ul>
+<hr />
+<h3 id="analisis-trafik-monitoring">5. ANALISIS TRAFIK &amp; MONITORING</h3>
+<p>Dashboard Web GUI menyediakan pemantauan real-time yang telah ditingkatkan:</p>
+<ul>
+<li><strong>Traffic Analysis (Live QPS):</strong>
+<ul>
+<li><strong>Garis Magenta (Pink):</strong> Menampilkan <strong>QPS (Queries Per Second)</strong> murni per detik.</li>
+<li><strong>Area Biru (Cyan):</strong> Menampilkan <strong>Snapshot Queries</strong> (kepadatan query terbaru).</li>
+<li><strong>High Load Warning:</strong> Indikator peringatan akan muncul jika QPS melebihi <strong>90.000 QPS</strong>.</li>
+<li><strong>Sampling Engine:</strong> Menggunakan <em>Deep Log Sampling</em> (200k baris) untuk akurasi tinggi pada trafik padat.</li>
+</ul></li>
+<li><strong>Combined Analysis (Baru):</strong>
+<ul>
+<li><strong>SERVFAIL &amp; Blocklist:</strong> Grafik batang gabungan yang menampilkan domain dengan error SERVFAIL terbanyak dan domain yang paling sering diblokir dalam satu tampilan ringkas.</li>
+<li>Membantu identifikasi cepat antara masalah jaringan (SERVFAIL) atau kebijakan blokir (Blocklist).</li>
+</ul></li>
+<li><strong>Hardware Monitoring:</strong>
+<ul>
+<li><strong>CPU &amp; RAM:</strong> Beban pemrosesan real-time.</li>
+<li><strong>HDD Usage:</strong> Pemantauan sisa ruang penyimpanan disk.</li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="fitur-baru-responsive-fullscreen-monitoring">5. FITUR BARU: RESPONSIVE FULLSCREEN MONITORING</h3>
+<p>Sistem kini dilengkapi dengan mode pemantauan layar penuh yang adaptif: - <strong>Auto-Scale:</strong> Grafik akan menyesuaikan ukurannya secara otomatis mengikuti orientasi dan ukuran layar perangkat. - <strong>Mobile Friendly:</strong> Dioptimalkan untuk iPhone dan Android dengan navigasi “Exit Fullscreen” yang mudah. - <strong>High Performance:</strong> Mode fullscreen menggunakan akselerasi GPU browser untuk memastikan render grafik tetap lancar tanpa membebani CPU server.</p>
+<hr />
+<h3 id="batasan-performa-isp-scale-limits">6. BATASAN PERFORMA (ISP SCALE LIMITS)</h3>
+<p>Sistem telah dikonfigurasi ulang untuk menangani topologi NAT dimana satu IP Public mewakili ribuan user:</p>
+<ul>
+<li><strong>Global Rate Limit:</strong> <strong>100.000 QPS</strong> (Perlindungan level server).</li>
+<li><strong>Per-IP Rate Limit:</strong> <strong>20.000 QPS</strong> (Ditingkatkan dari 1.000 QPS untuk mengakomodasi NAT).</li>
+<li><strong>Unbound Rate Limit:</strong> <strong>20.000 QPS</strong> per IP untuk rekursi.</li>
+<li><strong>DNS Flood Protection:</strong> Menggunakan modul <code>hashlimit</code> iptables yang efisien untuk memitigasi serangan tanpa memblokir trafik legit dari NAT yang padat.</li>
+</ul>
+<hr />
+<h3 id="manajemen-whitelist-malware">7. MANAJEMEN WHITELIST &amp; MALWARE</h3>
+<ul>
+<li><strong>Global Whitelist:</strong> IP/Subnet yang ditambahkan ke Whitelist akan melewati (bypass) semua aturan pemblokiran, rate limiting, dan intersepsi.</li>
+<li><strong>Malware Shield:</strong> Menggunakan database <code>/etc/dnsmasq.d/malware.conf</code> yang diperbarui secara berkala untuk memblokir situs berbahaya.</li>
+</ul>
+<hr />
+<h3 id="pemeliharaan-maintenance">8. PEMELIHARAAN (MAINTENANCE)</h3>
+<ul>
+<li><strong>Log System:</strong> Sistem secara otomatis melakukan rotasi log untuk mencegah kepenuhan disk.</li>
+<li><strong>Intelligent Self-Healing:</strong>
+<ul>
+<li><code>guardian.py</code> secara aktif memonitor port DNS (53/UDP) dan Web GUI (5000/TCP).</li>
+<li>Jika layanan macet atau mati, Guardian akan mencoba melakukan restart otomatis dan memperbaiki konfigurasi yang korup.</li>
+<li>Mendeteksi perubahan IP Network dan secara otomatis memperbarui aturan Firewall tanpa downtime.</li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="troubleshooting-web-gui">9. TROUBLESHOOTING WEB GUI</h3>
+<p>Jika Web GUI tidak dapat diakses:</p>
+<ol type="1">
+<li><strong>Pastikan menggunakan HTTPS (bukan HTTP):</strong> <code>https://IP_SERVER:5000</code></li>
+<li><strong>Sertifikat Self-Signed:</strong> Browser akan menampilkan peringatan keamanan - klik “Advanced” → “Proceed” untuk melanjutkan.</li>
+<li><strong>Cek status layanan:</strong> <code>sudo systemctl status dnsmars-gui</code></li>
+<li><strong>Restart Web GUI:</strong> <code>sudo systemctl restart dnsmars-gui</code></li>
+<li><strong>Health Check:</strong> Akses <code>https://IP_SERVER:5000/health</code> untuk memastikan layanan aktif.</li>
+<li><strong>Password default:</strong> <code>admin</code> (segera ganti setelah login pertama)</li>
+</ol>
+<hr />
+<p><em>Dokumen ini diperbarui secara otomatis oleh System Assistant.</em> <em>© 2026 PT MARS DATA TELEKOMUNIKASI</em></p>
 </body>
 </html>

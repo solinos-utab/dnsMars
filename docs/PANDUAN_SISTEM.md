@@ -24,6 +24,14 @@ Fitur ini dirancang untuk mematuhi regulasi pemblokiran konten negatif (Internet
 - **Status:** Jika DNS Trust "Enabled", pemblokiran aktif. Jika "Disabled", sistem tetap melakukan intersepsi namun dengan aturan yang lebih longgar.
 - **Guardian:** Layanan `guardian.py` memastikan aturan firewall tetap aktif meskipun sistem direstart.
 
+#### Captive Portal Bypass (False Positive Fix)
+Untuk mencegah perangkat (Android/iOS) mendeteksi jaringan sebagai "Captive Portal" palsu yang menyebabkan popup "Sign in to network" muncul terus-menerus:
+
+- **Mechanism:** Whitelisting domain connectivity check (misal: `connectivitycheck.gstatic.com`, `android.clients.google.com`) agar resolve ke IP asli via Unbound, bukan ke IP Block Page.
+- **Config:** `/etc/dnsmasq.d/captive_portal.conf`
+- **Domains Covered:** Android (Google), iOS (Apple), Windows, Firefox.
+- **Benefit:** User tidak akan melihat halaman blokir Internet Positif saat baru terkoneksi ke WiFi, kecuali mereka benar-benar mengakses konten terlarang.
+
 ---
 
 ### 3. PROTEKSI DISK DARURAT (NEW)
@@ -38,7 +46,21 @@ Guardian System kini dilengkapi dengan **Emergency Disk Protection** untuk mence
 
 ---
 
-### 4. ANALISIS TRAFIK & MONITORING
+### 4. MITIGASI SERANGAN INTERNAL & STABILITAS
+Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani ancaman kestabilan:
+
+- **Anti-Looping:** Dnsmasq dan Unbound dikonfigurasi untuk mendeteksi DNS forwarding loops.
+- **Memory Leak & Swap Thrashing:** 
+    - Guardian memantau penggunaan RAM dan Swap.
+    - Jika RAM > 90% dan Swap penuh (Thrashing), layanan DNS akan direstart otomatis untuk membebaskan memori sebelum sistem hang (OOM).
+- **UDP Drop Prevention:** 
+    - Kernel buffer (`rmem_default`, `rmem_max`) ditingkatkan hingga 16MB untuk mencegah paket loss saat traffic tinggi.
+- **IRQ Overload:** Menggunakan `irqbalance` untuk mendistribusikan beban interupsi jaringan ke semua core CPU.
+- **Botnet Mitigation:** Rate limit per-IP (20.000 QPS) mencegah satu botnet yang terinfeksi melumpuhkan seluruh server.
+
+---
+
+### 5. ANALISIS TRAFIK & MONITORING
 Dashboard Web GUI menyediakan pemantauan real-time yang telah ditingkatkan:
 
 - **Traffic Analysis (Live QPS):**

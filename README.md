@@ -1,4 +1,4 @@
-# Update 11 February 2026 17:10 
+# Update 11 February 2026 21 :03 
 # DNS MARS - ISP SCALE EDITION (V2.0)
 **High Performance Hybrid DNS (Dnsmasq + Unbound) with Advanced Threat Protection**
 

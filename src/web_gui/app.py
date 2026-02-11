@@ -262,7 +262,7 @@ def auto_block_worker():
                 time.sleep(600) # Sleep 10 mins
                 continue
                 
-            print("AutoBlock: Running analysis...")
+            # print("AutoBlock: Running analysis...")
             candidates = analyze_threat_candidates()
             
             domains_to_block = []

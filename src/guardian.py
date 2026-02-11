@@ -542,6 +542,10 @@ def check_disk_space():
                 run_cmd(f"truncate -s 0 {NGINX_LOG}")
                 log_event(f"Truncated {NGINX_LOG}")
                 
+            # 1.5 Vacuum Systemd Journal (Syslog)
+            run_cmd("journalctl --vacuum-size=50M")
+            log_event("Vacuumed systemd journal to 50MB")
+
             # 2. Check for rotated logs that are huge and delete them
             # Delete any .gz or .1 log file in /var/log/nginx older than 0 days (immediate)
             run_cmd("find /var/log/nginx -name '*.gz' -delete")

@@ -70,6 +70,23 @@
         .fullscreen-mode .fullscreen-exit-btn {
             display: block;
         }
+        
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.3); /* Blue tint */
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(59, 130, 246, 0.5);
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -719,7 +736,7 @@
 
     <!-- ACS Analysis Modal -->
     <div id="acs-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
-        <div class="glass p-8 rounded-3xl w-full max-w-4xl space-y-6 border border-red-500/30 h-[80vh] flex flex-col">
+        <div class="glass p-8 rounded-3xl w-full max-w-4xl space-y-6 border border-red-500/30 flex flex-col">
             <div class="flex justify-between items-start">
                 <div>
                     <h2 class="text-2xl font-orbitron text-red-500 mb-2">ADVANCED THREAT DETECTOR</h2>
@@ -759,40 +776,92 @@
                 </div>
                 <p class="text-[9px] text-slate-500 mt-2 italic">When enabled, the system will automatically block domains of these types every 10 minutes.</p>
             </div>
-            
-            <div class="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50 flex-1 overflow-hidden flex flex-col">
-                <div class="flex justify-between items-center mb-4 gap-4">
-                    <div class="relative flex-1">
-                        <input type="text" id="acs-search" onkeyup="filterACSList()" placeholder="Search domain..." class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-red-500">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-500 absolute right-3 top-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                    </div>
-                    <div class="flex gap-2">
-                        <button id="btn-bulk-block" onclick="blockSelectedACS()" class="hidden px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold rounded-lg transition shadow-lg shadow-red-900/20 font-orbitron">BLOCK SELECTED</button>
-                        <button onclick="loadACSCandidates()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg border border-slate-600 transition">REFRESH</button>
-                    </div>
+
+            <!-- Keyword Blocking Panel -->
+            <div class="bg-blue-900/10 border border-blue-500/20 p-3 rounded-xl mb-2 shrink-0">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xs font-orbitron text-blue-400">KEYWORD BLOCKING</h3>
+                    <span class="text-[9px] text-slate-500">Blocks domains containing these words</span>
                 </div>
-                <div class="overflow-y-auto flex-1 pr-2">
-                    <table class="w-full text-left text-xs">
-                        <thead class="text-slate-500 border-b border-slate-700/50 sticky top-0 bg-slate-900 z-10">
-                            <tr>
-                                <th class="pb-2 pl-2 w-8"><input type="checkbox" id="acs-select-all" onclick="toggleSelectAllACS()" class="rounded bg-slate-800 border-slate-600 text-red-600 focus:ring-0 cursor-pointer"></th>
-                                <th class="pb-2 pl-2">DOMAIN</th>
-                                <th class="pb-2 text-center">THREAT TYPE</th>
-                                <th class="pb-2 text-right">HITS</th>
-                                <th class="pb-2 text-right pr-2">ACTION</th>
-                            </tr>
-                        </thead>
-                        <tbody id="acs-table-body" class="text-slate-300 font-mono">
-                            <tr><td colspan="5" class="text-center py-8 text-slate-500">Scanning logs...</td></tr>
-                        </tbody>
-                    </table>
+                <div class="flex gap-2 mb-2">
+                    <input type="text" id="new-keyword" placeholder="Enter keyword (e.g. acs, toto)" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
+                    <button onclick="addKeyword()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-[10px] rounded-lg transition font-orbitron">ADD</button>
+                </div>
+                <div id="keyword-list" class="flex flex-wrap gap-2 max-h-[60px] overflow-y-auto custom-scrollbar p-1">
+                    <!-- Keywords injected here -->
+                    <span class="text-[10px] text-slate-500">Loading...</span>
                 </div>
             </div>
             
-            <div class="bg-yellow-900/20 border border-yellow-500/20 p-4 rounded-xl">
+            <!-- View List Button -->
+            <button onclick="openACSListModal()" class="w-full py-4 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl transition flex items-center justify-center gap-3 group">
+                <div class="p-2 bg-slate-700 rounded-lg group-hover:bg-slate-600 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                    </svg>
+                </div>
+                <div class="text-left">
+                    <span class="block text-xs font-orbitron text-white">VIEW THREAT CANDIDATES</span>
+                    <span class="block text-[10px] text-slate-400">Click to open full detailed list</span>
+                </div>
+            </button>
+            
+            <div class="bg-yellow-900/20 border border-yellow-500/20 p-4 rounded-xl mt-auto">
                 <p class="text-[10px] text-yellow-500">⚠ <strong>WARNING:</strong> Review before blocking. Some domains might be false positives (e.g. legitimate crypto wallets or ISP tools).</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACS List Modal (New) -->
+    <div id="acs-list-modal" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md hidden">
+        <div class="glass p-6 rounded-3xl w-full max-w-5xl h-[90vh] flex flex-col border border-red-500/30">
+            <div class="flex justify-between items-center mb-4 border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-xl font-orbitron text-white">THREAT CANDIDATES</h2>
+                    <p class="text-red-400 text-[10px] tracking-widest uppercase">LIVE ANALYSIS RESULTS</p>
+                </div>
+                <button onclick="closeACSListModal()" class="text-slate-400 hover:text-white transition p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <div class="flex justify-between items-center mb-4 gap-4 shrink-0">
+                <div class="relative flex-1">
+                    <input type="text" id="acs-search" onkeyup="filterACSList()" placeholder="Search domain..." class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-xs text-white focus:outline-none focus:border-red-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-500 absolute right-3 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                </div>
+                <div class="flex gap-2">
+                    <button id="btn-bulk-block" onclick="blockSelectedACS()" class="hidden px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold rounded-lg transition shadow-lg shadow-red-900/20 font-orbitron">BLOCK SELECTED</button>
+                    <button onclick="loadACSCandidates()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg border border-slate-600 transition flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        REFRESH
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-slate-900/50 rounded-xl border border-slate-700/50 flex-1 overflow-hidden flex flex-col min-h-0">
+                <div class="overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                    <table class="w-full text-left text-xs">
+                        <thead class="text-slate-500 border-b border-slate-700/50 sticky top-0 bg-slate-900 z-10 shadow-lg">
+                            <tr>
+                                <th class="py-3 pl-4 w-10 bg-slate-900"><input type="checkbox" id="acs-select-all" onclick="toggleSelectAllACS()" class="rounded bg-slate-800 border-slate-600 text-red-600 focus:ring-0 cursor-pointer w-4 h-4"></th>
+                                <th class="py-3 pl-2 bg-slate-900 font-orbitron text-slate-400">DOMAIN</th>
+                                <th class="py-3 text-center bg-slate-900 font-orbitron text-slate-400">THREAT TYPE</th>
+                                <th class="py-3 text-right bg-slate-900 font-orbitron text-slate-400">HITS</th>
+                                <th class="py-3 text-right pr-4 bg-slate-900 font-orbitron text-slate-400">ACTION</th>
+                            </tr>
+                        </thead>
+                        <tbody id="acs-table-body" class="text-slate-300 font-mono">
+                            <tr><td colspan="5" class="text-center py-12 text-slate-500">Click Refresh to scan...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -2045,8 +2114,81 @@
         // --- ACS BOTNET ANALYSIS ---
         function openACSModal() {
             document.getElementById('acs-modal').classList.remove('hidden');
-            loadACSCandidates();
             loadAutoBlockConfig();
+            loadKeywords();
+        }
+
+        function openACSListModal() {
+            document.getElementById('acs-list-modal').classList.remove('hidden');
+            loadACSCandidates();
+        }
+
+        function closeACSListModal() {
+            document.getElementById('acs-list-modal').classList.add('hidden');
+        }
+
+        async function loadKeywords() {
+            try {
+                const res = await fetch('/api/threat/keywords');
+                const data = await res.json();
+                const container = document.getElementById('keyword-list');
+                
+                if (data.keywords && data.keywords.length > 0) {
+                    container.innerHTML = data.keywords.map(kw => `
+                        <div class="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded px-2 py-0.5 group hover:border-blue-500 transition">
+                            <span class="text-[9px] text-white font-mono">${kw}</span>
+                            <button onclick="deleteKeyword('${kw}')" class="text-slate-500 hover:text-red-400 text-[10px] leading-none">×</button>
+                        </div>
+                    `).join('');
+                } else {
+                    container.innerHTML = '<span class="text-[9px] text-slate-500 italic">No keywords defined</span>';
+                }
+            } catch (e) {
+                console.error("Error loading keywords:", e);
+            }
+        }
+
+        async function addKeyword() {
+            const input = document.getElementById('new-keyword');
+            const keyword = input.value.trim();
+            if (!keyword) return;
+            
+            try {
+                const res = await fetch('/api/threat/keywords', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({keyword: keyword})
+                });
+                if (res.ok) {
+                    input.value = '';
+                    loadKeywords();
+                    // loadACSCandidates(); // Don't auto-reload list as it is now in separate modal
+                } else {
+                    alert('Failed to add keyword');
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+        }
+
+        async function deleteKeyword(keyword) {
+            if (!confirm(`Delete keyword "${keyword}"?`)) return;
+            
+            try {
+                const res = await fetch('/api/threat/keywords', {
+                    method: 'DELETE',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({keyword: keyword})
+                });
+                if (res.ok) {
+                    loadKeywords();
+                    // loadACSCandidates(); // Don't auto-reload list
+                } else {
+                    alert('Failed to delete keyword');
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
         }
 
         function closeACSModal() {
@@ -2123,14 +2265,14 @@
             if (data.length > 0) {
                 tbody.innerHTML = data.map(item => `
                     <tr class="border-b border-slate-800/50 hover:bg-slate-800/30 transition group">
-                        <td class="py-2 pl-2"><input type="checkbox" value="${item.domain}" class="acs-checkbox rounded bg-slate-800 border-slate-600 text-red-600 focus:ring-0 cursor-pointer" onclick="updateBulkButton()"></td>
-                        <td class="py-2 pl-2 text-white">${item.domain}</td>
-                        <td class="py-2 text-center">
-                            <span class="px-2 py-0.5 rounded text-[10px] ${getThreatColor(item.type)}">${item.type}</span>
+                        <td class="py-1 pl-2"><input type="checkbox" value="${item.domain}" class="acs-checkbox rounded bg-slate-800 border-slate-600 text-red-600 focus:ring-0 cursor-pointer w-3 h-3" onclick="updateBulkButton()"></td>
+                        <td class="py-1 pl-2 text-white text-[10px]">${item.domain}</td>
+                        <td class="py-1 text-center">
+                            <span class="px-1.5 py-0.5 rounded text-[9px] ${getThreatColor(item.type)}">${item.type}</span>
                         </td>
-                        <td class="py-2 text-right text-neon-blue">${item.count}</td>
-                        <td class="py-2 text-right pr-2">
-                            <button onclick="blockDomain('${item.domain}')" class="px-3 py-1 bg-red-500/20 text-red-400 text-[10px] rounded hover:bg-red-500/40 transition">BLOCK</button>
+                        <td class="py-1 text-right text-neon-blue text-[10px]">${item.count}</td>
+                        <td class="py-1 text-right pr-2">
+                            <button onclick="blockDomain('${item.domain}')" class="px-2 py-0.5 bg-red-500/20 text-red-400 text-[9px] rounded hover:bg-red-500/40 transition">BLOCK</button>
                         </td>
                     </tr>
                 `).join('');
@@ -2210,6 +2352,7 @@
             if (type.includes('ACS')) return 'bg-purple-500/20 text-purple-400';
             if (type.includes('MINER')) return 'bg-yellow-500/20 text-yellow-400';
             if (type.includes('C2')) return 'bg-red-500/20 text-red-400';
+            if (type.includes('KEYWORD')) return 'bg-blue-500/20 text-blue-400';
             return 'bg-slate-700 text-slate-400';
         }
 

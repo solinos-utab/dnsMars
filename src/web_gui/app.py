@@ -95,6 +95,17 @@ def sync_config():
 def is_authenticated():
     return session.get('authenticated', False)
 
+def get_threat_keywords():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT keyword FROM threat_keywords")
+        rows = c.fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except:
+        return []
+
 def analyze_threat_candidates():
     # Load Blacklist to filter results
     blacklist = set()
@@ -112,7 +123,20 @@ def analyze_threat_candidates():
     results = []
     try:
         # Extended Regex for comprehensive Botnet/Threat Detection
-        regex_pattern = "(acs|tr069|cwmp|soap|mirai|mozi|botnet|cnc\\.|loader|miner|pool\\.|crypto|wallet|tor\\.|onion\\.|trojan|ransom|payload|gate\\.|panel\\.)"
+        base_patterns = [
+            "acs", "tr069", "cwmp", "soap", "mirai", "mozi", "botnet", 
+            "cnc\\.", "loader", "miner", "pool\\.", "crypto", "wallet", 
+            "tor\\.", "onion\\.", "trojan", "ransom", "payload", "gate\\.", "panel\\."
+        ]
+        
+        # Add custom keywords from DB
+        custom_keywords = get_threat_keywords()
+        # Escape keywords to prevent regex injection
+        escaped_keywords = [re.escape(k) for k in custom_keywords]
+        
+        # Combine all patterns
+        all_patterns = base_patterns + escaped_keywords
+        regex_pattern = "(" + "|".join(all_patterns) + ")"
         
         # Increased log depth to 3000 lines for better detection rate
         cmd = f"grep -Ei 'query\\[A\\] .*{regex_pattern}' /var/log/dnsmasq.log | tail -n 3000 | awk '{{print $6}}' | sort | uniq -c | sort -nr | head -n 50"
@@ -132,14 +156,24 @@ def analyze_threat_candidates():
                 # Determine Threat Type
                 threat_type = "UNKNOWN"
                 domain_lower = domain.lower()
-                if any(x in domain_lower for x in ['acs', 'tr069', 'cwmp', 'soap', 'telekom']):
-                    threat_type = "ACS/TR-069 (Botnet)"
-                elif any(x in domain_lower for x in ['pool', 'mine', 'crypto', 'wallet', 'xmr', 'eth']):
-                    threat_type = "CRYPTO MINER"
-                elif any(x in domain_lower for x in ['cnc', 'control', 'bot', 'mirai', 'mozi', 'panel', 'gate']):
-                    threat_type = "C2 / BOTNET"
-                else:
-                    threat_type = "SUSPICIOUS"
+                
+                # Check custom keywords first
+                keyword_match = False
+                for kw in custom_keywords:
+                    if kw.lower() in domain_lower:
+                        threat_type = f"KEYWORD BLOCK ({kw})"
+                        keyword_match = True
+                        break
+                
+                if not keyword_match:
+                    if any(x in domain_lower for x in ['acs', 'tr069', 'cwmp', 'soap', 'telekom']):
+                        threat_type = "ACS/TR-069 (Botnet)"
+                    elif any(x in domain_lower for x in ['pool', 'mine', 'crypto', 'wallet', 'xmr', 'eth']):
+                        threat_type = "CRYPTO MINER"
+                    elif any(x in domain_lower for x in ['cnc', 'control', 'bot', 'mirai', 'mozi', 'panel', 'gate']):
+                        threat_type = "C2 / BOTNET"
+                    else:
+                        threat_type = "SUSPICIOUS"
 
                 results.append({'domain': domain, 'count': count, 'type': threat_type})
                 
@@ -158,6 +192,43 @@ def get_acs_candidates():
         return jsonify({'candidates': results})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/threat/keywords', methods=['GET', 'POST', 'DELETE'])
+def threat_keywords_api():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+
+    if request.method == 'GET':
+        return jsonify({'keywords': get_threat_keywords()})
+
+    if request.method == 'POST':
+        data = request.json
+        keyword = data.get('keyword', '').strip().lower()
+        if not keyword:
+            return jsonify({'status': 'error', 'message': 'Invalid keyword'})
+        
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("INSERT OR IGNORE INTO threat_keywords (keyword) VALUES (?)", (keyword,))
+            conn.commit()
+            conn.close()
+            return jsonify({'status': 'success'})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)})
+
+    if request.method == 'DELETE':
+        data = request.json
+        keyword = data.get('keyword', '').strip().lower()
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("DELETE FROM threat_keywords WHERE keyword = ?", (keyword,))
+            conn.commit()
+            conn.close()
+            return jsonify({'status': 'success'})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)})
 
 def block_domains_internal(domains_to_block):
     if not domains_to_block:
@@ -784,6 +855,8 @@ def init_db():
                      (id INTEGER PRIMARY KEY, enabled INTEGER, start_time TEXT, end_time TEXT, trust_ips TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS auto_block_config
                      (threat_type TEXT PRIMARY KEY, enabled INTEGER)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS threat_keywords
+                     (keyword TEXT PRIMARY KEY)''')
         
         # Default schedule (disabled, 00:00 to 00:00, default IPs)
         c.execute("INSERT OR IGNORE INTO trust_schedule (id, enabled, start_time, end_time, trust_ips) VALUES (1, 0, '00:00', '00:00', '8.8.8.8, 1.1.1.1')")

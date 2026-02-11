@@ -24,7 +24,7 @@ Sistem DNS yang dioptimalkan untuk ISP dengan topologi NAT skala besar, mampu me
 - **False Positive Fix:** Whitelist otomatis untuk `connectivitycheck` Android/iOS (Anti-Captive Portal issue).
 
 ### 4. Keamanan & Stabilitas
-- **Log Safety:** Rotasi log otomatis (Max 100MB) mencegah disk penuh.
+- **Log Safety:** Rotasi log otomatis (Max 50MB) mencegah disk penuh.
 - **Emergency Protection:** Guardian menghapus log jika disk > 90%.
 - **Anti-DDoS:** Iptables hashlimit untuk mitigasi serangan flood.
 - **Auto-Healing:** Service restart otomatis jika macet/crash.

@@ -63,6 +63,10 @@ Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani
     - Kernel buffer (`rmem_default`, `rmem_max`) ditingkatkan hingga 16MB untuk mencegah paket loss saat traffic tinggi.
 - **IRQ Overload:** Menggunakan `irqbalance` untuk mendistribusikan beban interupsi jaringan ke semua core CPU.
 - **Botnet Mitigation:** Rate limit per-IP (20.000 QPS) mencegah satu botnet yang terinfeksi melumpuhkan seluruh server.
+- **Video Streaming Optimization (Serve-Expired):**
+    - Mengaktifkan fitur *serve-expired* pada Unbound (Timeout: 1000ms).
+    - DNS akan menyajikan cache kadaluarsa (expired) sejenak kepada client untuk respon instan, sambil melakukan update cache di background.
+    - Menghilangkan buffering/loading awal pada aplikasi video (YouTube, TikTok, dll).
 
 ---
 
@@ -137,7 +141,7 @@ Fitur sinkronisasi otomatis untuk konfigurasi Cluster DNS (Primary-Secondary).
 Sistem telah diamankan dari risiko "Disk Full" akibat banjir log (Log Flooding):
 
 - **Auto Log Rotation:** Log sistem (`dnsmasq.log`, `guardian.log`, `nginx`) dikonfigurasi dengan **Logrotate** yang ketat:
-    - **Max Size:** 100MB per file.
+    - **Max Size:** 50MB per file (Aggressive Rotation).
     - **Rotasi:** Maksimal 3 file backup.
     - **Kompresi:** Log lama otomatis dikompres (.gz) untuk menghemat ruang.
 - **Proteksi Disk Darurat:** Jika disk tetap penuh hingga 90% (misal karena serangan masif), Guardian akan otomatis **menghapus paksa** log lama agar layanan DNS tetap hidup.

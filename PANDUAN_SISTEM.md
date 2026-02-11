@@ -12,6 +12,7 @@ Sistem ini menggunakan arsitektur **Hybrid DNS High Performance** yang menggabun
 - **Security:** Anti-DDoS (iptables Hashlimit), Malware Shield (100k+ domains), Intelligent Self-Healing Guardian.
 - **Web GUI:** Management Dashboard berbasis Flask dengan antarmuka modern dan responsif.
 - **Topologi:** Mendukung **NAT Topology** (Ribuan user dibalik satu IP Public) dengan manajemen koneksi yang efisien.
+- **High Availability:** Mendukung sinkronisasi konfigurasi ke Secondary DNS secara otomatis.
 
 ---
 
@@ -23,6 +24,11 @@ Fitur ini dirancang untuk mematuhi regulasi pemblokiran konten negatif (Internet
 - **Konfigurasi Utama:** `/etc/dnsmasq.d/smartdns.conf` (Single Source of Truth).
 - **Status:** Jika DNS Trust "Enabled", pemblokiran aktif. Jika "Disabled", sistem tetap melakukan intersepsi namun dengan aturan yang lebih longgar.
 - **Guardian:** Layanan `guardian.py` memastikan aturan firewall tetap aktif meskipun sistem direstart.
+
+#### DNS Trust Schedule (BARU)
+Fitur penjadwalan otomatis untuk mengaktifkan/menonaktifkan DNS Trust pada jam tertentu.
+- **Fungsi:** Berguna untuk kebijakan pemblokiran berbasis waktu (misal: blokir aktif hanya di jam kerja).
+- **Akses:** Menu "Internet Positif" -> tombol "SET SCHEDULE".
 
 #### Captive Portal Bypass (False Positive Fix)
 Untuk mencegah perangkat (Android/iOS) mendeteksi jaringan sebagai "Captive Portal" palsu yang menyebabkan popup "Sign in to network" muncul terus-menerus:
@@ -66,10 +72,11 @@ Fitur intelijen keamanan baru untuk mendeteksi dan memblokir ancaman jaringan ti
 - **ACS / TR-069 Botnet Detection:** Mendeteksi pola komunikasi dari perangkat yang terinfeksi botnet (Mirai, Mozi) atau protokol manajemen ISP yang tidak diinginkan (ACS).
 - **Crypto Miner Blocking:** Mengidentifikasi dan memblokir trafik ke mining pool cryptocurrency yang memakan resource CPU/Bandwidth pelanggan.
 - **C2 Server Blocking:** Memutus komunikasi antara perangkat terinfeksi dengan Command & Control server peretas.
+- **Keyword Blocking (BARU):** Memblokir domain berdasarkan kata kunci tertentu (misal: "toto", "slot", "porn"). Domain yang cocok dengan keyword akan otomatis diblokir oleh Auto-Block System.
 - **Actionable Intelligence:** 
     - **One-Click Block:** Operator dapat langsung memblokir domain berbahaya dari dashboard.
-    - **Bulk Action (BARU):** Fitur seleksi massal dan pencarian (Search) memungkinkan pemblokiran banyak domain sekaligus dengan satu kali restart service.
-    - **Auto-Block System (BARU):** Sistem dapat dikonfigurasi untuk secara otomatis memblokir domain berdasarkan kategori ancaman (ACS, Miner, C2) setiap 10 menit tanpa intervensi manual.
+    - **Bulk Action (BARU):** Fitur seleksi massal, pencarian (Search), dan penghapusan massal (Bulk Delete) pada daftar Blacklist/Whitelist.
+    - **Auto-Block System (BARU):** Sistem dapat dikonfigurasi untuk secara otomatis memblokir domain berdasarkan kategori ancaman (ACS, Miner, C2) dan Keyword setiap 10 menit tanpa intervensi manual.
     - **Safe Blocking:** Pemblokiran ancaman ini **TIDAK** akan memutus koneksi internet pelanggan, hanya memutus jalur komunikasi malware tersebut.
     - **Recovery:** Domain yang tidak sengaja diblokir dapat dikembalikan (Unblock) melalui menu **Blacklist**.
 
@@ -86,7 +93,7 @@ Dashboard Web GUI menyediakan pemantauan real-time yang telah ditingkatkan:
 
 - **Combined Analysis (Baru):**
     - **SERVFAIL & Blocklist:** Grafik batang gabungan yang menampilkan domain dengan error SERVFAIL terbanyak dan domain yang paling sering diblokir dalam satu tampilan ringkas.
-    - Membantu identifikasi cepat antara masalah jaringan (SERVFAIL) atau kebijakan blokir (Blocklist).
+    - **Advanced Table View:** Klik tombol "VIEW THREAT CANDIDATES" untuk melihat tabel detail ancaman dalam popup terpisah dengan fitur pencarian dan filtering.
 
 - **Hardware Monitoring:**
     - **CPU & RAM:** Beban pemrosesan real-time.
@@ -118,7 +125,15 @@ Sistem telah dikonfigurasi ulang untuk menangani topologi NAT dimana satu IP Pub
 
 ---
 
-### 10. PEMELIHARAAN & KEAMANAN LOG (LOG SAFETY)
+### 10. SECONDARY DNS SYNC (HIGH AVAILABILITY)
+Fitur sinkronisasi otomatis untuk konfigurasi Cluster DNS (Primary-Secondary).
+- **Mekanisme:** VM Secondary secara otomatis menyalin database konfigurasi, blacklist, dan whitelist dari VM Primary setiap 5 menit.
+- **Setup:** Panduan instalasi VM Secondary tersedia di menu dashboard "Secondary DNS Sync".
+- **Manfaat:** Memastikan konsistensi kebijakan blokir di seluruh node DNS.
+
+---
+
+### 11. PEMELIHARAAN & KEAMANAN LOG (LOG SAFETY)
 Sistem telah diamankan dari risiko "Disk Full" akibat banjir log (Log Flooding):
 
 - **Auto Log Rotation:** Log sistem (`dnsmasq.log`, `guardian.log`, `nginx`) dikonfigurasi dengan **Logrotate** yang ketat:

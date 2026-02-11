@@ -12,8 +12,9 @@ Sistem DNS yang dioptimalkan untuk ISP dengan topologi NAT skala besar, mampu me
 
 ### 2. System Threat Analysis (BARU)
 - **Botnet & Malware Blocking:** Mendeteksi dan memblokir trafik ACS/TR-069, Crypto Miners, dan C2 Servers.
-- **Bulk Management:** Fitur Search & Select All untuk memblokir ratusan domain ancaman sekaligus.
-- **Auto-Block System (BARU):** Otomatisasi pemblokiran ancaman (ACS, Miner, C2) setiap 10 menit.
+- **Keyword Blocking (BARU):** Blokir otomatis domain yang mengandung kata kunci tertentu (misal: judi/porn).
+- **Bulk Management:** Fitur Search & Select All untuk memblokir/menghapus ratusan domain sekaligus.
+- **Auto-Block System:** Otomatisasi pemblokiran ancaman setiap 10 menit dengan dukungan Keyword Blocking.
 - **Safe Blocking:** Memutus jalur komunikasi malware tanpa memutus internet user.
 - **Dashboard:** Monitoring real-time dengan "One-Click Block".
 
@@ -27,6 +28,7 @@ Sistem DNS yang dioptimalkan untuk ISP dengan topologi NAT skala besar, mampu me
 - **Emergency Protection:** Guardian menghapus log jika disk > 90%.
 - **Anti-DDoS:** Iptables hashlimit untuk mitigasi serangan flood.
 - **Auto-Healing:** Service restart otomatis jika macet/crash.
+- **Secondary Sync:** Sinkronisasi konfigurasi ke server secondary untuk High Availability.
 
 ## 🛠️ Instalasi & Update
 Jalankan script auto-installer:

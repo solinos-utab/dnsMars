@@ -68,6 +68,8 @@ Fitur intelijen keamanan baru untuk mendeteksi dan memblokir ancaman jaringan ti
 - **C2 Server Blocking:** Memutus komunikasi antara perangkat terinfeksi dengan Command & Control server peretas.
 - **Actionable Intelligence:** 
     - **One-Click Block:** Operator dapat langsung memblokir domain berbahaya dari dashboard.
+    - **Bulk Action (BARU):** Fitur seleksi massal dan pencarian (Search) memungkinkan pemblokiran banyak domain sekaligus dengan satu kali restart service.
+    - **Auto-Block System (BARU):** Sistem dapat dikonfigurasi untuk secara otomatis memblokir domain berdasarkan kategori ancaman (ACS, Miner, C2) setiap 10 menit tanpa intervensi manual.
     - **Safe Blocking:** Pemblokiran ancaman ini **TIDAK** akan memutus koneksi internet pelanggan, hanya memutus jalur komunikasi malware tersebut.
     - **Recovery:** Domain yang tidak sengaja diblokir dapat dikembalikan (Unblock) melalui menu **Blacklist**.
 

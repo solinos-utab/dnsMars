@@ -728,6 +728,38 @@
                 <button onclick="closeACSModal()" class="text-slate-400 hover:text-white">✕</button>
             </div>
             
+            <!-- Auto-Block Configuration Panel -->
+            <div class="bg-red-900/10 border border-red-500/20 p-4 rounded-xl mb-2">
+                <h3 class="text-xs font-orbitron text-red-400 mb-3 flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                    AUTOMATIC BLOCKING SYSTEM
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="flex items-center justify-between bg-black/20 p-2 rounded-lg border border-red-500/10">
+                        <span class="text-[10px] text-slate-300 font-mono">ACS/TR-069</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="ab-acs" onchange="saveAutoBlockConfig()" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600"></div>
+                        </label>
+                    </div>
+                    <div class="flex items-center justify-between bg-black/20 p-2 rounded-lg border border-red-500/10">
+                        <span class="text-[10px] text-slate-300 font-mono">CRYPTO MINER</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="ab-miner" onchange="saveAutoBlockConfig()" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600"></div>
+                        </label>
+                    </div>
+                    <div class="flex items-center justify-between bg-black/20 p-2 rounded-lg border border-red-500/10">
+                        <span class="text-[10px] text-slate-300 font-mono">C2 / BOTNET</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="ab-c2" onchange="saveAutoBlockConfig()" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600"></div>
+                        </label>
+                    </div>
+                </div>
+                <p class="text-[9px] text-slate-500 mt-2 italic">When enabled, the system will automatically block domains of these types every 10 minutes.</p>
+            </div>
+            
             <div class="bg-slate-900/50 rounded-xl p-4 border border-slate-700/50 flex-1 overflow-hidden flex flex-col">
                 <div class="flex justify-between items-center mb-4 gap-4">
                     <div class="relative flex-1">
@@ -2014,10 +2046,43 @@
         function openACSModal() {
             document.getElementById('acs-modal').classList.remove('hidden');
             loadACSCandidates();
+            loadAutoBlockConfig();
         }
 
         function closeACSModal() {
             document.getElementById('acs-modal').classList.add('hidden');
+        }
+
+        async function loadAutoBlockConfig() {
+            try {
+                const res = await fetch('/api/autoblock/config');
+                const data = await res.json();
+                
+                document.getElementById('ab-acs').checked = data['ACS/TR-069 (Botnet)'] || false;
+                document.getElementById('ab-miner').checked = data['CRYPTO MINER'] || false;
+                document.getElementById('ab-c2').checked = data['C2 / BOTNET'] || false;
+            } catch (e) {
+                console.error("Error loading autoblock config:", e);
+            }
+        }
+
+        async function saveAutoBlockConfig() {
+            const config = {
+                'ACS/TR-069 (Botnet)': document.getElementById('ab-acs').checked,
+                'CRYPTO MINER': document.getElementById('ab-miner').checked,
+                'C2 / BOTNET': document.getElementById('ab-c2').checked
+            };
+            
+            try {
+                await fetch('/api/autoblock/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+            } catch (e) {
+                console.error("Error saving autoblock config:", e);
+                alert("Failed to save settings");
+            }
         }
 
         let acsCandidates = []; // Global variable to store current ACS data

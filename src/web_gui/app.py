@@ -95,11 +95,7 @@ def sync_config():
 def is_authenticated():
     return session.get('authenticated', False)
 
-@app.route('/api/botnet/acs')
-def get_acs_candidates():
-    if not is_authenticated():
-        return jsonify({'error': 'Unauthorized'}), 401
-    
+def analyze_threat_candidates():
     # Load Blacklist to filter results
     blacklist = set()
     try:
@@ -113,10 +109,9 @@ def get_acs_candidates():
     except:
         pass
 
-    candidates = {}
+    results = []
     try:
         # Extended Regex for comprehensive Botnet/Threat Detection
-        # Includes: ACS/TR069, Mining Pools, C2 Servers, Malware Loaders, DDoS Tools
         regex_pattern = "(acs|tr069|cwmp|soap|mirai|mozi|botnet|cnc\\.|loader|miner|pool\\.|crypto|wallet|tor\\.|onion\\.|trojan|ransom|payload|gate\\.|panel\\.)"
         
         # Increased log depth to 3000 lines for better detection rate
@@ -124,7 +119,6 @@ def get_acs_candidates():
         
         output = subprocess.check_output(cmd, shell=True).decode('utf-8')
         
-        results = []
         for line in output.split('\n'):
             parts = line.strip().split()
             if len(parts) >= 2:
@@ -149,27 +143,25 @@ def get_acs_candidates():
 
                 results.append({'domain': domain, 'count': count, 'type': threat_type})
                 
+    except Exception as e:
+        print(f"Error in threat analysis: {e}")
+        
+    return results
+
+@app.route('/api/botnet/acs')
+def get_acs_candidates():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        results = analyze_threat_candidates()
         return jsonify({'candidates': results})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/block', methods=['POST'])
-def block_domain_endpoint():
-    if not is_authenticated():
-        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
-    
-    data = request.json
-    
-    # Handle single domain or bulk domains
-    domains_to_block = []
-    
-    if 'domains' in data and isinstance(data['domains'], list):
-        domains_to_block = data['domains']
-    elif 'domain' in data:
-        domains_to_block = [data['domain']]
-    
+def block_domains_internal(domains_to_block):
     if not domains_to_block:
-        return jsonify({'status': 'error', 'message': 'No domains provided'}), 400
+        return 0, "No domains provided"
         
     server_ip = get_server_ip()
     blocked_count = 0
@@ -203,7 +195,7 @@ def block_domain_endpoint():
                 blocked_count += 1
 
         if not new_entries:
-             return jsonify({'status': 'success', 'message': 'All domains were already blocked'})
+             return 0, "All domains were already blocked"
 
         # Append all new entries at once
         with open('/etc/dnsmasq.d/blacklist.conf', 'a') as f:
@@ -212,14 +204,113 @@ def block_domain_endpoint():
         # Use background restart to prevent browser timeout
         success, msg = safe_service_restart(background=True)
         if not success:
-            # Revert changes if config invalid (complex for bulk, but we try)
-            # For bulk, we might just return error, but let's try to remove added lines
-            # This is risky, so we rely on safe_service_restart pre-check mostly.
-            return jsonify({'status': 'error', 'message': msg})
+            return 0, msg
             
-        return jsonify({'status': 'success', 'message': f'{blocked_count} domains blocked successfully'})
+        return blocked_count, f"{blocked_count} domains blocked successfully"
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return 0, str(e)
+
+@app.route('/api/block', methods=['POST'])
+def block_domain_endpoint():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    data = request.json
+    
+    # Handle single domain or bulk domains
+    domains_to_block = []
+    
+    if 'domains' in data and isinstance(data['domains'], list):
+        domains_to_block = data['domains']
+    elif 'domain' in data:
+        domains_to_block = [data['domain']]
+    
+    count, message = block_domains_internal(domains_to_block)
+    
+    if count > 0 or "already blocked" in message:
+        return jsonify({'status': 'success', 'message': message})
+    else:
+        return jsonify({'status': 'error', 'message': message})
+
+# --- AUTO BLOCK SYSTEM ---
+
+def get_autoblock_config():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT threat_type, enabled FROM auto_block_config")
+        rows = c.fetchall()
+        conn.close()
+        
+        config = {}
+        for r in rows:
+            config[r[0]] = bool(r[1])
+        return config
+    except Exception as e:
+        print(f"Error reading autoblock config: {e}")
+        return {}
+
+def auto_block_worker():
+    # Wait for system to stabilize
+    time.sleep(30)
+    
+    while True:
+        try:
+            config = get_autoblock_config()
+            # If no config is enabled, skip analysis
+            if not any(config.values()):
+                time.sleep(600) # Sleep 10 mins
+                continue
+                
+            print("AutoBlock: Running analysis...")
+            candidates = analyze_threat_candidates()
+            
+            domains_to_block = []
+            for item in candidates:
+                threat_type = item['type']
+                domain = item['domain']
+                
+                # Check if this threat type is enabled for auto-blocking
+                if config.get(threat_type, False):
+                    domains_to_block.append(domain)
+            
+            if domains_to_block:
+                print(f"AutoBlock: Found {len(domains_to_block)} domains to block. Types: {config}")
+                count, msg = block_domains_internal(domains_to_block)
+                print(f"AutoBlock: {msg}")
+            
+        except Exception as e:
+            print(f"AutoBlock Error: {e}")
+            
+        time.sleep(600) # Run every 10 minutes
+
+# Start AutoBlock Thread
+autoblock_thread = threading.Thread(target=auto_block_worker, daemon=True)
+autoblock_thread.start()
+
+@app.route('/api/autoblock/config', methods=['GET', 'POST'])
+def autoblock_config_endpoint():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        
+    if request.method == 'GET':
+        return jsonify(get_autoblock_config())
+        
+    if request.method == 'POST':
+        try:
+            data = request.json
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            for threat_type, enabled in data.items():
+                c.execute("INSERT OR REPLACE INTO auto_block_config (threat_type, enabled) VALUES (?, ?)", 
+                          (threat_type, 1 if enabled else 0))
+            
+            conn.commit()
+            conn.close()
+            return jsonify({'status': 'success', 'config': get_autoblock_config()})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -691,6 +782,8 @@ def init_db():
                      (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS trust_schedule
                      (id INTEGER PRIMARY KEY, enabled INTEGER, start_time TEXT, end_time TEXT, trust_ips TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS auto_block_config
+                     (threat_type TEXT PRIMARY KEY, enabled INTEGER)''')
         
         # Default schedule (disabled, 00:00 to 00:00, default IPs)
         c.execute("INSERT OR IGNORE INTO trust_schedule (id, enabled, start_time, end_time, trust_ips) VALUES (1, 0, '00:00', '00:00', '8.8.8.8, 1.1.1.1')")

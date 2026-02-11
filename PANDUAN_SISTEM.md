@@ -72,6 +72,9 @@ Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani
     - **WhatsApp:** Whitelist Facebook CDN (`fbcdn.net`, `fbsbx.com`) untuk kelancaran kirim/terima media (Gambar/Video).
     - **YouTube:** Whitelist Google Global Cache (`ggc.cmvideo.cn`, `ytimgg.com`) untuk streaming tanpa buffer.
     - **Shopee:** Whitelist domain Live Streaming & Log Collector (`livetech`, `log-collector`) untuk mempercepat load awal aplikasi.
+    - **TikTok:** Whitelist domain core, API, dan CDN (`tiktokv`, `tiktokw`, `byteoversea`) untuk memastikan aplikasi dan streaming berjalan lancar.
+    - **SnackVideo:** Whitelist domain API dan Open Platform (`kwaizt.com`) untuk stabilitas aplikasi.
+    - **Akamai:** Whitelist domain Analytics (`akamai.tt.omtrdc.net`) untuk mencegah gangguan pada layanan pihak ketiga yang menggunakan Akamai.
 - **High Load Tracker Optimization (Null Route):**
     - Domain tracker yang menghasilkan beban CPU tinggi (misal: `pangle.io`, `kwai-pro.com`) kini di-route ke `0.0.0.0` (Null Route).
     - Mencegah server Nginx terbebani oleh ribuan request HTTPS background dari aplikasi mobile.

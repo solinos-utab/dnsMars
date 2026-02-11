@@ -40,6 +40,17 @@ Jalankan script auto-installer:
 sudo ./install.sh
 ```
 
+### Setup Secondary DNS (High Availability)
+Untuk mengaktifkan Secondary DNS, ikuti langkah berikut di server Secondary:
+1. **Install Base System:** Jalankan `install.sh` seperti biasa.
+2. **Sync Config:** Jalankan perintah sync yang didapat dari Web GUI Primary (Menu: Secondary DNS Sync).
+3. **Recursive Mode (Optional):** Agar Secondary menjadi resolver mandiri (tidak bergantung pada Google/Upstream lain), install Unbound:
+   ```bash
+   sudo apt install -y unbound
+   # Config unbound port 5335 & Arahkan dnsmasq ke 127.0.0.1#5335
+   ```
+   *Detail instruksi lengkap tersedia di menu "Secondary DNS Sync" pada Web GUI.*
+
 ## 📊 Web Management GUI
 Akses dashboard monitoring melalui browser:
 - **URL:** `https://IP_SERVER:5000`

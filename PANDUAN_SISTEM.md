@@ -191,5 +191,57 @@ Jika sistem melambat atau DNS sering putus:
    - Password default: `admin` (segera ganti setelah login pertama)
 
 ---
+### 13. TROUBLESHOOTING SECONDARY DNS
+Panduan khusus untuk mengatasi masalah pada Node Secondary:
+
+#### A. Secondary DNS Menampilkan Google Resolver (Bukan Self)
+Jika hasil tes DNS Leak (misal: dnscheck.tools) di sisi client menampilkan "Google" sebagai resolver saat terkoneksi ke Secondary DNS, ini berarti dnsmasq mem-forward query ke upstream Google (8.8.8.8) karena tidak memiliki resolver lokal.
+
+**Solusi (Aktifkan Recursive Mode):**
+Ubah Secondary menjadi Independent Resolver dengan menginstal Unbound.
+1. **Install Unbound:**
+   ```bash
+   sudo apt install -y unbound
+   ```
+2. **Konfigurasi Unbound (Port 5335):**
+   Buat file `/etc/unbound/unbound.conf.d/pi-hole.conf` dengan isi:
+   ```text
+   server:
+       interface: 127.0.0.1
+       port: 5335
+       do-ip4: yes
+       do-udp: yes
+       do-tcp: yes
+       access-control: 127.0.0.0/8 allow
+   ```
+3. **Arahkan Dnsmasq ke Local Unbound:**
+   ```bash
+   # Hapus forwarder google
+   sudo sed -i '/server=8.8.8.8/d' /etc/dnsmasq.conf
+   # Tambahkan local unbound
+   echo "server=127.0.0.1#5335" | sudo tee -a /etc/dnsmasq.conf
+   ```
+4. **Restart Service:**
+   ```bash
+   sudo systemctl restart unbound dnsmasq
+   ```
+
+#### B. Koneksi Lambat/RTO pada LXC Container (Proxmox)
+Jika Secondary DNS berjalan di container LXC dan mengalami koneksi lambat atau packet loss (RTO) saat sinkronisasi atau resolusi DNS.
+
+**Penyebab:**
+Nilai MTU (Maximum Transmission Unit) default interface LXC (1500) seringkali tidak cocok dengan interface fisik host atau tunnel VPN, menyebabkan fragmentasi paket.
+
+**Solusi (Turunkan MTU):**
+Ubah MTU interface network menjadi 1440 atau 1300.
+1. Edit file konfigurasi network (misal: Netplan atau `/etc/network/interfaces`).
+2. Atau set sementara via command line:
+   ```bash
+   sudo ip link set dev eth0 mtu 1440
+   ```
+3. Pastikan setting permanen diterapkan agar bertahan setelah reboot.
+
+---
+
 *Dokumen ini diperbarui secara otomatis oleh System Assistant.*
 *© 2026 PT MARS DATA TELEKOMUNIKASI*

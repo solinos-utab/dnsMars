@@ -1,11 +1,13 @@
 /var/log/dnsmasq.log {
-    su root syslog
     daily
-    rotate 3
+    missingok
+    rotate 5
     maxsize 100M
     compress
     delaycompress
-    missingok
     notifempty
-    copytruncate
+    create 0640 dnsmasq root
+    postrotate
+        /etc/init.d/dnsmasq restart > /dev/null
+    endscript
 }

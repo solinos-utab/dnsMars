@@ -142,7 +142,7 @@ def analyze_threat_candidates():
         # Grep for pipe | must be escaped as \| in regex or used with -F for fixed strings, 
         # but here we use -E (extended regex). The domain contains '|' which is a special char in regex.
         # We need to ensure the grep command correctly captures domains with special chars.
-        cmd = f"grep -Ei 'query\\[A\\] .*{regex_pattern}' /run/dnsmasq.log | tail -n 3000 | awk '{{print $6}}' | sort | uniq -c | sort -nr | head -n 50"
+        cmd = f"grep -Ei 'query\\[A\\] .*{regex_pattern}' /var/log/dnsmasq.log | tail -n 3000 | awk '{{print $6}}' | sort | uniq -c | sort -nr | head -n 50"
         
         output = subprocess.check_output(cmd, shell=True).decode('utf-8')
         
@@ -560,7 +560,7 @@ def get_traffic_stats():
         
         # Increase tail for ISP scale (200k lines handles up to 40k QPS over 5s)
         # Assuming avg 20k QPS * 5s = 100k lines. Using 200k for safety margin.
-        cmd = "sudo tail -n 200000 /run/dnsmasq.log | grep 'query\\['"
+        cmd = "sudo tail -n 200000 /var/log/dnsmasq.log | grep 'query\\['"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
@@ -599,7 +599,7 @@ def get_per_ip_traffic_stats(limit=20):
     Returns: {ip: queries, rate_limit_status}
     """
     try:
-        cmd = f"sudo tail -n 50000 /run/dnsmasq.log | grep 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        cmd = f"sudo tail -n 50000 /var/log/dnsmasq.log | grep 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
@@ -641,12 +641,12 @@ def get_servfail_stats(limit=5):
     """
     try:
         # Get total queries in recent logs
-        cmd_total = "sudo tail -n 100000 /run/dnsmasq.log | grep 'query\\[' | wc -l"
+        cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
         total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         total_queries = int(total_result) if total_result else 1
         
         # Get SERVFAIL errors by domain
-        cmd = f"sudo tail -n 100000 /run/dnsmasq.log | grep 'reply is SERVFAIL' | awk '{{print $8}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        cmd = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep 'reply is SERVFAIL' | awk '{{print $8}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
@@ -682,13 +682,13 @@ def get_blocklist_stats(limit=10):
     """
     try:
         # Get total queries
-        cmd_total = "sudo tail -n 100000 /run/dnsmasq.log | grep 'query\\[' | wc -l"
+        cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
         total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         total_queries = int(total_result) if total_result else 1
         
         # Find blocked domains (queries that were denied/replied with NXDOMAIN or 0.0.0.0)
         # dnsmasq marks blocked queries with specific patterns in logs
-        cmd = f"sudo tail -n 100000 /run/dnsmasq.log | grep -E 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        cmd = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -E 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
@@ -700,7 +700,7 @@ def get_blocklist_stats(limit=10):
         
         # Match "config domain is IP" or "reply domain is IP"
         # We look for 0.0.0.0, 127.0.0.1, or the Server IP (for block page redirect)
-        cmd_blocked = f"sudo tail -n 100000 /run/dnsmasq.log | grep -E 'config|reply' | grep -E ' is (0\\.0\\.0\\.0|127\\.0\\.0\\.1|{server_ip_esc})$' | awk '{{print $6}}' | sort | uniq -c | sort -rn | head -n {limit}"
+        cmd_blocked = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -E 'config|reply' | grep -E ' is (0\\.0\\.0\\.0|127\\.0\\.0\\.1|{server_ip_esc})$' | awk '{{print $6}}' | sort | uniq -c | sort -rn | head -n {limit}"
         blocked_result = subprocess.run(cmd_blocked, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         blocklist_data = []
@@ -1749,7 +1749,7 @@ def logs():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
     # Get last 20 lines of dnsmasq logs
-    proc = run_command("sudo tail -n 20 /run/dnsmasq.log")
+    proc = run_command("sudo tail -n 20 /var/log/dnsmasq.log")
     logs = (proc.stdout or '').strip() if proc else ''
     return jsonify({'logs': logs})
 

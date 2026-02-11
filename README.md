@@ -23,6 +23,7 @@ Sistem DNS yang dioptimalkan untuk ISP dengan topologi NAT skala besar, mampu me
 - **Compliance:** Pemblokiran konten negatif sesuai regulasi.
 - **Smart Redirect:** Intersepsi HTTPS yang mulus ke halaman blokir.
 - **False Positive Fix:** Whitelist otomatis untuk `connectivitycheck` Android/iOS (Anti-Captive Portal issue).
+- **App Optimization:** Whitelist khusus untuk Roblox, WhatsApp (Media), YouTube (GGC), dan Shopee (Live) agar berjalan lancar tanpa terblokir filter ads/malware.
 
 ### 4. Keamanan & Stabilitas
 - **Log Safety:** Rotasi log otomatis (Max 50MB) mencegah disk penuh.

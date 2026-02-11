@@ -67,6 +67,11 @@ Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani
     - Mengaktifkan fitur *serve-expired* pada Unbound (Timeout: 1000ms).
     - DNS akan menyajikan cache kadaluarsa (expired) sejenak kepada client untuk respon instan, sambil melakukan update cache di background.
     - Menghilangkan buffering/loading awal pada aplikasi video (YouTube, TikTok, dll).
+- **Application Whitelist Optimization (False Positive Fixes):**
+    - **Roblox:** Whitelist domain telemetri & ads (`ads.roblox.com`, `client-telemetry.roblox.com`) yang diperlukan untuk login/gameplay.
+    - **WhatsApp:** Whitelist Facebook CDN (`fbcdn.net`, `fbsbx.com`) untuk kelancaran kirim/terima media (Gambar/Video).
+    - **YouTube:** Whitelist Google Global Cache (`ggc.cmvideo.cn`, `ytimgg.com`) untuk streaming tanpa buffer.
+    - **Shopee:** Whitelist domain Live Streaming & Log Collector (`livetech`, `log-collector`) untuk mempercepat load awal aplikasi.
 - **High Load Tracker Optimization (Null Route):**
     - Domain tracker yang menghasilkan beban CPU tinggi (misal: `pangle.io`, `kwai-pro.com`) kini di-route ke `0.0.0.0` (Null Route).
     - Mencegah server Nginx terbebani oleh ribuan request HTTPS background dari aplikasi mobile.

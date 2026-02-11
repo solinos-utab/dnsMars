@@ -159,9 +159,9 @@ Fitur sinkronisasi otomatis untuk konfigurasi Cluster DNS (Primary-Secondary).
 ### 11. PEMELIHARAAN & KEAMANAN LOG (LOG SAFETY)
 Sistem telah diamankan dari risiko "Disk Full" akibat banjir log (Log Flooding):
 
-- **Auto Log Rotation:** Log sistem (`dnsmasq.log`, `guardian.log`, `nginx`) dikonfigurasi dengan **Logrotate** yang ketat:
-    - **Max Size:** 50MB per file (Aggressive Rotation).
-    - **Rotasi:** Maksimal 3 file backup.
+- **Auto Log Rotation:** Log sistem (`dnsmasq.log`, `guardian.log`, `nginx`) dikonfigurasi dengan **Logrotate** yang optimal untuk disk 50GB:
+    - **Dnsmasq:** Max 500MB per file, Rotasi 14 file (Retensi 2 Minggu).
+    - **Nginx/Syslog:** Max 500MB, Rotasi 4 file.
     - **Kompresi:** Log lama otomatis dikompres (.gz) untuk menghemat ruang.
 - **Proteksi Disk Darurat:** Jika disk tetap penuh hingga 90% (misal karena serangan masif), Guardian akan otomatis **menghapus paksa** log lama agar layanan DNS tetap hidup.
 - **Intelligent Self-Healing:** 

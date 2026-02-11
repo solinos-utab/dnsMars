@@ -1,8 +1,9 @@
 /var/log/dnsmasq.log {
+    su root syslog
     daily
     missingok
-    rotate 5
-    maxsize 100M
+    rotate 14
+    maxsize 500M
     compress
     delaycompress
     notifempty

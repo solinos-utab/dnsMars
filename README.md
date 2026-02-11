@@ -26,8 +26,8 @@ Sistem DNS yang dioptimalkan untuk ISP dengan topologi NAT skala besar, mampu me
 - **App Optimization:** Whitelist khusus untuk Roblox (Gameplay Fix), WhatsApp, YouTube, Shopee, TikTok, SnackVideo, Akamai, Google Play Services, Global Analytics (App-Measurement/Sentry), Apple (iCloud/iTunes), dan Xiaomi (MiCloud) agar berjalan lancar tanpa terblokir filter ads/malware.
 
 ### 4. Keamanan & Stabilitas
-- **Log Safety:** Rotasi log otomatis (Max 50MB) mencegah disk penuh.
-- **High Perf Logging:** Log DNS diproses di RAM (/run/dnsmasq.log) untuk performa maksimal.
+- **Log Safety:** Rotasi log otomatis (Max 500MB) dengan retensi 2 minggu.
+- **High Perf Disk Logging:** Log DNS menggunakan disk 50GB (/var/log/dnsmasq.log) untuk stabilitas & persistensi data.
 - **CPU Saver:** Null Route untuk tracker berat (hemat CPU 50%).
 - **Emergency Protection:** Guardian menghapus log jika disk > 90%.
 - **Anti-DDoS:** Iptables hashlimit untuk mitigasi serangan flood.

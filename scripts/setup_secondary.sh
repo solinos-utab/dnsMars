@@ -46,6 +46,26 @@ if [[ \$RESPONSE == *"success"* ]]; then
     echo "\$RESPONSE" | jq -r '.configs.alias' > /etc/dnsmasq.d/alias.conf
     echo "\$RESPONSE" | jq -r '.configs.whitelist_firewall' > /home/whitelist.conf
     
+    # Handle Trust (Internet Positif) Sync
+    TRUST_ENABLED=\$(echo "\$RESPONSE" | jq -r '.trust_config.enabled')
+    BLOCKLIST_FILE="/etc/dnsmasq.d/internet_positif.conf"
+    BLOCKLIST_DISABLED="/home/dns/blocklists/disabled/internet_positif.conf"
+    
+    # Ensure disabled dir exists
+    mkdir -p /home/dns/blocklists/disabled
+    
+    if [[ "\$TRUST_ENABLED" == "true" ]]; then
+        if [ -f "\$BLOCKLIST_DISABLED" ]; then
+            mv "\$BLOCKLIST_DISABLED" "\$BLOCKLIST_FILE"
+        fi
+        # If file missing entirely, we might need to download it (optional future improvement)
+        # For now, we assume Secondary was installed with install.sh which provides the file
+    else
+        if [ -f "\$BLOCKLIST_FILE" ]; then
+            mv "\$BLOCKLIST_FILE" "\$BLOCKLIST_DISABLED"
+        fi
+    fi
+
     # Test and Restart
     dnsmasq --test && systemctl restart dnsmasq
     echo "Sync Successful: \$(date)"

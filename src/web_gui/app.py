@@ -76,6 +76,9 @@ def sync_config():
         'whitelist_firewall': '/home/dns/whitelist.conf'
     }
     
+    # Check Trust Status
+    trust_info = get_trust_info()
+    
     for key, path in files_to_sync.items():
         if os.path.exists(path):
             try:
@@ -89,7 +92,10 @@ def sync_config():
     return jsonify({
         'status': 'success',
         'timestamp': datetime.now().isoformat(),
-        'configs': configs
+        'configs': configs,
+        'trust_config': {
+            'enabled': trust_info['enabled']
+        }
     })
 
 def is_authenticated():
@@ -375,9 +381,161 @@ def auto_block_worker():
             
         time.sleep(600) # Run every 10 minutes
 
-# Start AutoBlock Thread
-autoblock_thread = threading.Thread(target=auto_block_worker, daemon=True)
-autoblock_thread.start()
+def schedule_worker():
+    # Wait for system to stabilize
+    time.sleep(45)
+    
+    last_status = None
+    
+    while True:
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("SELECT enabled, start_time, end_time FROM trust_schedule WHERE id=1")
+            row = c.fetchone()
+            conn.close()
+            
+            if row:
+                enabled = bool(row[0])
+                start_time_str = row[1]
+                end_time_str = row[2]
+                
+                # If schedule is disabled in DB, do nothing (Manual mode overrides or stays as is)
+                # Wait, if schedule is enabled, we enforce time.
+                # If schedule is disabled, we assume manual control and do NOT touch it.
+                # BUT, the user toggles "enabled" in the UI to turn ON the feature.
+                # The "schedule" feature implies "Time Based Activation".
+                
+                # Logic Refinement:
+                # The 'trust_schedule' table 'enabled' flag means "Is Schedule Mode Active?".
+                # If Enabled: We check time. If inside window -> Trust ON. If outside -> Trust OFF.
+                # If Disabled: We DO NOT touch Trust state (Manual Mode).
+                
+                # HOWEVER, the UI 'toggle_trust' endpoint updates this 'enabled' flag!
+                # See toggle_trust: c.execute("UPDATE trust_schedule SET enabled=? WHERE id=1", (db_enabled,))
+                
+                # This implies 'enabled' = "Trust is ON".
+                # But then 'start_time' and 'end_time' are just attributes?
+                # If start_time == end_time (e.g. 00:00), maybe it means "Always On"?
+                
+                # User Requirement: "dns trust baik mode scedule dan manual tidak berjalan"
+                # This suggests there are TWO modes.
+                # Let's check how the UI likely works (inference).
+                # Usually: 
+                # Mode 1: Manual ON/OFF.
+                # Mode 2: Scheduled (ON during X to Y).
+                
+                # Current DB Schema: id, enabled, start_time, end_time.
+                # If I treat 'enabled' as "Global Master Switch", then:
+                # If enabled=1: Check Time. 
+                #    If Time 00:00-00:00 -> Always ON.
+                #    If Time Set -> ON only during window.
+                # If enabled=0: Always OFF.
+                
+                # BUT, 'toggle_trust' sets enabled=1 when user clicks "Enable".
+                # So if user clicks Enable, enabled=1.
+                # If they set a schedule, say 08:00 - 17:00.
+                # Then at 18:00, it should be OFF.
+                # At 18:00, enabled=1 (in DB), but outside window.
+                # So the worker should turn it OFF.
+                
+                # What happens if user manually clicks "Disable"?
+                # toggle_trust sets enabled=0. Worker sees enabled=0, ensures it's OFF.
+                
+                # What if user manually clicks "Enable" at 18:00 (outside schedule)?
+                # toggle_trust sets enabled=1.
+                # Worker sees enabled=1. Checks time (18:00). Outside window (08-17).
+                # Worker turns it OFF immediately!
+                # This prevents Manual Override outside schedule if Schedule is "Always Active".
+                
+                # To support both Manual and Schedule, we usually need a "mode" flag.
+                # Since we lack a "mode" column, let's assume:
+                # If start_time == end_time (00:00 - 00:00), it's MANUAL MODE (Always ON if enabled=1).
+                # If start_time != end_time, it's SCHEDULE MODE.
+                
+                if enabled:
+                    should_be_active = False
+                    
+                    if start_time_str == end_time_str:
+                        # Manual Mode (Always On)
+                        should_be_active = True
+                    else:
+                        # Schedule Mode
+                        now = datetime.now()
+                        current_time = now.strftime('%H:%M')
+                        
+                        # Handle cross-midnight (e.g. 22:00 to 06:00)
+                        if start_time_str > end_time_str:
+                            if current_time >= start_time_str or current_time < end_time_str:
+                                should_be_active = True
+                        else:
+                            if start_time_str <= current_time < end_time_str:
+                                should_be_active = True
+                    
+                    # Apply State
+                    trust_info = get_trust_info()
+                    is_currently_active = trust_info['enabled']
+                    
+                    if should_be_active and not is_currently_active:
+                        print(f"Schedule: Activating Trust (Time: {start_time_str}-{end_time_str})")
+                        # Call toggle logic internally
+                        # We can reuse the API logic or call a function.
+                        # Reusing API logic via requests is risky (auth).
+                        # Better extract toggle logic to a function.
+                        perform_trust_toggle(True)
+                        
+                    elif not should_be_active and is_currently_active:
+                        print(f"Schedule: Deactivating Trust (Time: {start_time_str}-{end_time_str})")
+                        perform_trust_toggle(False)
+                        
+        except Exception as e:
+            print(f"Schedule Worker Error: {e}")
+            
+        time.sleep(60) # Check every minute
+
+# Start Schedule Thread
+schedule_thread = threading.Thread(target=schedule_worker, daemon=True)
+schedule_thread.start()
+
+def perform_trust_toggle(enable):
+    blocklist_file = '/etc/dnsmasq.d/internet_positif.conf'
+    blocklist_disabled = '/home/dns/blocklists/disabled/internet_positif.conf'
+    
+    # Ensure disabled directory exists
+    if not os.path.exists('/home/dns/blocklists/disabled'):
+        run_command('sudo mkdir -p /home/dns/blocklists/disabled')
+        run_command('sudo chown dns:dns /home/dns/blocklists/disabled')
+
+    if enable:
+        # Enable Blocklist
+        if os.path.exists(blocklist_disabled):
+            run_command(f"sudo mv {blocklist_disabled} {blocklist_file}")
+        elif not os.path.exists(blocklist_file):
+            print("Blocklist file missing")
+            return False
+        
+        # Verify file moved
+        if not os.path.exists(blocklist_file):
+             run_command(f"sudo cp {blocklist_disabled} {blocklist_file}")
+
+        # Apply firewall rules
+        run_command("sudo bash /home/dns/setup_firewall.sh")
+        safe_service_restart()
+        return True
+    else:
+        # Disable Blocklist
+        if os.path.exists(blocklist_file):
+            if not os.path.exists('/home/dns/blocklists/disabled'):
+                run_command('sudo mkdir -p /home/dns/blocklists/disabled')
+            run_command(f"sudo mv {blocklist_file} {blocklist_disabled}")
+        
+        # Ensure no stray .disabled files
+        run_command("sudo rm -f /etc/dnsmasq.d/*.disabled")
+
+        # Apply firewall rules
+        run_command("sudo bash /home/dns/setup_firewall.sh")
+        safe_service_restart()
+        return True
 
 @app.route('/api/autoblock/config', methods=['GET', 'POST'])
 def autoblock_config_endpoint():
@@ -1672,12 +1830,10 @@ def action():
         # ISP Scale: Toggle local content filtering (Internet Positif)
         trust_enabled = data.get('trust_enabled', False)
         
-        # SYNC WITH SCHEDULE DB to prevent Guardian from fighting back
+        # SYNC WITH SCHEDULE DB
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            # If enabling, set schedule enabled=1. If disabling, enabled=0.
-            # We preserve start/end times.
             db_enabled = 1 if trust_enabled else 0
             c.execute("UPDATE trust_schedule SET enabled=? WHERE id=1", (db_enabled,))
             conn.commit()
@@ -1685,62 +1841,12 @@ def action():
         except Exception as e:
             print(f"Error syncing schedule DB: {e}")
 
-        blocklist_file = '/etc/dnsmasq.d/internet_positif.conf'
-        blocklist_disabled = '/home/dns/blocklists/disabled/internet_positif.conf'
-        
-        # Ensure disabled directory exists
-        if not os.path.exists('/home/dns/blocklists/disabled'):
-            run_command('sudo mkdir -p /home/dns/blocklists/disabled')
-            run_command('sudo chown dns:dns /home/dns/blocklists/disabled')
-        
-        if trust_enabled:
-            # Enable Blocklist
-            if os.path.exists(blocklist_disabled):
-                res = run_command(f"sudo mv {blocklist_disabled} {blocklist_file}")
-                if res.returncode != 0:
-                    return jsonify({'status': 'error', 'message': f'Failed to enable blocklist: {res.stderr}'})
-            elif not os.path.exists(blocklist_file):
-                return jsonify({'status': 'error', 'message': 'Blocklist file missing. Please update database.'})
-            
-            # Verify file moved
-            if not os.path.exists(blocklist_file):
-                 # Try force copy if move failed (sometimes across filesystems issues)
-                 run_command(f"sudo cp {blocklist_disabled} {blocklist_file}")
-                 if not os.path.exists(blocklist_file):
-                     return jsonify({'status': 'error', 'message': 'Critical: Blocklist file not found after enabling.'})
-
-            # Apply firewall rules immediately (for interception if needed)
-            run_command("sudo bash /home/dns/setup_firewall.sh")
-            
-            success, msg = safe_service_restart()
-            if not success:
-                # Attempt rollback
-                run_command(f"sudo mv {blocklist_file} {blocklist_disabled}")
-                return jsonify({'status': 'error', 'message': f'Service refused config: {msg}'})
-            return jsonify({'status': 'success', 'message': 'Internet Positif (Local Filtering) ENABLED'})
+        # Use shared function
+        if perform_trust_toggle(trust_enabled):
+            status_msg = "ENABLED" if trust_enabled else "DISABLED"
+            return jsonify({'status': 'success', 'message': f'Internet Positif (Local Filtering) {status_msg}'})
         else:
-            # Disable Blocklist
-            if os.path.exists(blocklist_file):
-                # Ensure target directory exists
-                if not os.path.exists('/home/dns/blocklists/disabled'):
-                    run_command('sudo mkdir -p /home/dns/blocklists/disabled')
-                
-                res = run_command(f"sudo mv {blocklist_file} {blocklist_disabled}")
-                if res.returncode != 0:
-                    # Try force remove if move fails
-                    run_command(f"sudo rm -f {blocklist_file}")
-                    # return jsonify({'status': 'error', 'message': f'Failed to disable blocklist: {res.stderr}'})
-            
-            # Ensure no stray .disabled files in active directory
-            run_command("sudo rm -f /etc/dnsmasq.d/*.disabled")
-
-            # Apply firewall rules immediately
-            run_command("sudo bash /home/dns/setup_firewall.sh")
-            
-            success, msg = safe_service_restart()
-            if not success:
-                return jsonify({'status': 'error', 'message': f'Service restart failed: {msg}'})
-            return jsonify({'status': 'success', 'message': 'Internet Positif (Local Filtering) DISABLED'})
+            return jsonify({'status': 'error', 'message': 'Failed to toggle trust settings'})
         
     return jsonify({'status': 'success'})
 

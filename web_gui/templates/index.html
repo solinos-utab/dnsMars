@@ -70,9 +70,32 @@
         .fullscreen-mode .fullscreen-exit-btn {
             display: block;
         }
+        
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.3); /* Blue tint */
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(59, 130, 246, 0.5);
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
+    <!-- License Generator Badge -->
+    <div class="fixed top-4 right-4 z-40 bg-black/50 backdrop-blur-md border border-yellow-600/50 rounded-lg px-3 py-1.5 text-[10px] font-orbitron cursor-pointer hover:bg-black/70 transition flex items-center gap-2" id="license-status" onclick="openLicenseGenerator()">
+        <span class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
+        <span class="text-yellow-500">LICENSE GENERATOR</span>
+    </div>
+
     <!-- Login Modal -->
     <div id="login-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
         <div class="glass p-8 rounded-3xl w-full max-w-md space-y-6 border border-blue-500/30">
@@ -134,8 +157,8 @@
 
     <!-- Domain List Modal -->
     <div id="list-modal" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
-        <div class="glass p-8 rounded-3xl w-full max-w-xl space-y-6 border border-blue-500/30">
-            <div class="flex justify-between items-center border-b border-white/10 pb-4">
+        <div class="glass p-6 rounded-3xl w-full max-w-2xl h-[80vh] flex flex-col border border-blue-500/30">
+            <div class="flex justify-between items-center border-b border-white/10 pb-4 mb-4">
                 <div>
                     <h2 id="list-modal-title" class="text-2xl font-orbitron text-white">DOMAIN LIST</h2>
                     <p id="list-modal-subtitle" class="text-blue-400 text-[10px] tracking-widest uppercase">MANAGE ENTRIES</p>
@@ -146,10 +169,37 @@
                     </svg>
                 </button>
             </div>
-            <div id="list-modal-content" class="max-h-[400px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                <!-- List items will be injected here -->
+
+            <!-- Toolbar -->
+            <div class="flex justify-between items-center mb-4 gap-4 shrink-0">
+                <div class="relative flex-1">
+                    <input type="text" id="list-search" onkeyup="filterListModal()" placeholder="Search domain..." class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-500 absolute right-3 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                </div>
+                <button id="btn-list-bulk-delete" onclick="deleteSelectedListItems()" class="hidden px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold rounded-lg transition shadow-lg shadow-red-900/20 font-orbitron">DELETE SELECTED</button>
             </div>
-            <div class="flex justify-end pt-4 border-t border-white/10">
+
+            <!-- List Content -->
+            <div class="bg-slate-900/50 rounded-xl border border-slate-700/50 flex-1 overflow-hidden flex flex-col min-h-0">
+                <div class="overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                    <table class="w-full text-left text-xs">
+                        <thead class="text-slate-500 border-b border-slate-700/50 sticky top-0 bg-slate-900 z-10">
+                            <tr>
+                                <th class="py-3 pl-4 w-10 bg-slate-900"><input type="checkbox" id="list-select-all" onclick="toggleSelectListModal()" class="rounded bg-slate-800 border-slate-600 text-blue-500 focus:ring-0 cursor-pointer w-4 h-4"></th>
+                                <th class="py-3 pl-2 bg-slate-900 font-orbitron text-slate-400">DOMAIN</th>
+                                <th class="py-3 text-right pr-4 bg-slate-900 font-orbitron text-slate-400">ACTION</th>
+                            </tr>
+                        </thead>
+                        <tbody id="list-modal-content" class="text-slate-300 font-mono">
+                            <!-- List items will be injected here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <div class="flex justify-end pt-4 border-t border-white/10 mt-4">
                 <button onclick="closeListModal()" class="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white font-orbitron rounded-xl transition">CLOSE</button>
             </div>
         </div>
@@ -170,7 +220,7 @@
                 </button>
             </div>
             
-            <div class="space-y-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+            <div id="secondary-setup-content" class="space-y-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
                 <!-- Step 1 -->
                 <div class="space-y-3">
                     <div class="flex items-center gap-3">
@@ -282,7 +332,7 @@
                 <div>
                     <h1 class="text-2xl md:text-3xl font-bold font-orbitron tracking-wider text-white">PT MARS DATA TELEKOMUNIKASI</h1>
                     <div class="flex items-center gap-4 mt-1">
-                            <p class="text-blue-400 font-medium tracking-widest text-xs">DUAL STACK DNS ENGINE ft AI <span id="header-node-role" class="ml-2 text-white bg-blue-600 px-2 py-0.5 rounded text-[8px]">PRIMARY</span></p>
+                            <p class="text-blue-400 font-medium tracking-widest text-xs">DNS ENGINE CYBER SECURITY <span id="header-node-role" class="ml-2 text-white bg-blue-600 px-2 py-0.5 rounded text-[8px]">PRIMARY</span></p>
                             <button onclick="openPasswordModal()" class="text-[9px] text-slate-500 hover:text-purple-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">CHANGE PWD</button>
                             <button onclick="logout()" class="text-[9px] text-slate-500 hover:text-red-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">LOGOUT</button>
                         </div>
@@ -369,6 +419,9 @@
                         <button onclick="openGuardianModal()" class="text-left px-4 py-3 bg-blue-900/20 hover:bg-blue-900/40 border border-blue-500/30 rounded-xl transition group">
                             <span class="block text-[10px] text-blue-400 font-orbitron">CONFIGURATION</span><span class="text-xs font-bold text-white">GUARDIAN SETTINGS</span>
                         </button>
+                        <button onclick="openACSModal()" class="text-left px-4 py-3 bg-red-900/20 hover:bg-red-900/40 border border-red-500/30 rounded-xl transition group animate-pulse">
+                            <span class="block text-[10px] text-red-400 font-orbitron">INTELLIGENCE</span><span class="text-xs font-bold text-white">⚠ SYSTEM THREAT ANALYSIS</span>
+                        </button>
                     </div>
                 </div>
 
@@ -445,9 +498,17 @@
                         <h2 class="text-sm font-orbitron text-white uppercase tracking-wider">SERVFAIL & BLOCKLIST ANALYSIS</h2>
                         <div class="flex items-center gap-2">
                             <span id="combined-count" class="text-xs font-orbitron text-slate-300">Loading...</span>
-                            <button onclick="toggleFullscreen('combined-traffic-container')" class="text-slate-400 hover:text-white transition p-1" title="Toggle Fullscreen">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                            <button onclick="openAnalysisListModal()" class="text-slate-500 hover:text-blue-400 transition p-1.5 hover:bg-white/5 rounded-lg" title="View Details">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                                </svg>
                             </button>
+                            <button onclick="toggleFullscreen('combined-traffic-container')" class="fullscreen-close-btn hidden text-xs bg-red-500/20 hover:bg-red-500/40 text-red-400 px-3 py-1 rounded-lg border border-red-500/30 transition font-orbitron">EXIT</button>
+                            <div class="fullscreen-btn-wrapper">
+                                <button onclick="toggleFullscreen('combined-traffic-container')" class="text-slate-400 hover:text-white transition p-1" title="Toggle Fullscreen">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="h-[280px] chart-wrapper"><canvas id="combinedTrafficChart"></canvas></div>
@@ -565,20 +626,28 @@
                     <p class="text-[9px] text-red-400 text-center">Warning: Incorrect settings may disconnect the server!</p>
                 </div>
 
-                <!-- DNS Trust -->
+                <!-- DNS Trust / Internet Positif -->
                 <div class="glass p-5 rounded-2xl space-y-4">
-                    <h2 class="text-sm font-orbitron text-green-400 border-b border-white/10 pb-2">DNS TRUST</h2>
+                    <h2 class="text-sm font-orbitron text-green-400 border-b border-white/10 pb-2">INTERNET POSITIF</h2>
                     <div class="flex items-center justify-between">
-                        <span class="text-[10px] text-slate-400 font-orbitron">ENABLE DNS TRUST</span>
+                        <div>
+                            <span class="text-[10px] text-slate-400 font-orbitron block">LOCAL FILTERING</span>
+                            <span class="text-[8px] text-slate-600 font-mono">Auto-Block Porn/Gambling</span>
+                        </div>
                         <label class="relative inline-flex items-center cursor-pointer">
                             <input type="checkbox" id="trust-toggle" onchange="toggleTrust()" class="sr-only peer">
                             <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
                         </label>
                     </div>
                     <div class="space-y-2">
-                        <input type="text" id="trust-ip-input" placeholder="Trust DNS IP (e.g. 1.1.1.1)" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-[10px] text-white focus:outline-none focus:border-green-500">
+                        <!-- Removed IP Input - Using Local Database -->
+                        <div class="bg-slate-900/50 p-3 rounded-lg border border-white/5">
+                            <p class="text-[9px] text-slate-400 leading-relaxed">
+                                <span class="text-green-400 font-bold">MODE MANDIRI:</span> Menggunakan database lokal (StevenBlack Unified) untuk memblokir konten negatif tanpa bergantung pada DNS luar.
+                            </p>
+                        </div>
                         <div class="grid grid-cols-2 gap-2">
-                            <button onclick="toggleTrust()" class="w-full py-2 bg-green-600/20 hover:bg-green-600/40 border border-green-500/30 rounded-lg text-[10px] font-orbitron text-white transition">UPDATE TRUST</button>
+                            <button onclick="toggleTrust()" class="w-full py-2 bg-green-600/20 hover:bg-green-600/40 border border-green-500/30 rounded-lg text-[10px] font-orbitron text-white transition">APPLY SETTING</button>
                             <button onclick="openTrustScheduleModal()" class="w-full py-2 bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/30 rounded-lg text-[10px] font-orbitron text-white transition">SET SCHEDULE</button>
                         </div>
                     </div>
@@ -613,6 +682,41 @@
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <!-- Analysis List Modal -->
+    <div id="analysis-list-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] hidden flex items-center justify-center p-4">
+        <div class="glass max-w-2xl w-full rounded-2xl border border-blue-500/30 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="bg-gradient-to-r from-blue-900/20 to-purple-900/20 p-5 border-b border-white/10 shrink-0">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h3 class="text-blue-400 font-orbitron text-sm">SERVFAIL & BLOCKLIST DETAILS</h3>
+                        <p class="text-[9px] text-slate-500 font-orbitron mt-1 uppercase">Detailed Domain Analysis</p>
+                    </div>
+                    <button onclick="closeAnalysisListModal()" class="text-slate-500 hover:text-white transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="p-0 overflow-hidden flex-1 flex flex-col">
+                <div class="overflow-y-auto flex-1 p-4 custom-scrollbar">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="sticky top-0 bg-slate-900/95 backdrop-blur-md z-10">
+                            <tr>
+                                <th class="py-3 px-4 text-[10px] font-orbitron text-slate-500 border-b border-white/10">DOMAIN</th>
+                                <th class="py-3 px-4 text-[10px] font-orbitron text-slate-500 border-b border-white/10 text-right">TYPE</th>
+                                <th class="py-3 px-4 text-[10px] font-orbitron text-slate-500 border-b border-white/10 text-right">COUNT</th>
+                            </tr>
+                        </thead>
+                        <tbody id="analysis-list-body" class="text-[11px] font-mono">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -663,7 +767,375 @@
         </div>
     </div>
 
+    <!-- ACS Analysis Modal -->
+    <div id="acs-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden">
+        <div class="glass p-8 rounded-3xl w-full max-w-4xl space-y-6 border border-red-500/30 flex flex-col">
+            <div class="flex justify-between items-start">
+                <div>
+                    <h2 class="text-2xl font-orbitron text-red-500 mb-2">ADVANCED THREAT DETECTOR</h2>
+                    <p class="text-slate-400 text-xs tracking-widest">DETECTING: BOTNETS, MINERS, C2, TR-069, MALWARE</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="exportThreatsPDF()" class="px-3 py-1 bg-red-600 hover:bg-red-500 text-white text-xs font-orbitron rounded border border-red-400/50 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        EXPORT PDF
+                    </button>
+                    <button onclick="closeACSModal()" class="text-slate-400 hover:text-white">✕</button>
+                </div>
+            </div>
+            
+            <!-- Auto-Block Configuration Panel -->
+            <div class="bg-red-900/10 border border-red-500/20 p-4 rounded-xl mb-2">
+                <h3 class="text-xs font-orbitron text-red-400 mb-3 flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                    AUTOMATIC BLOCKING SYSTEM
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="flex items-center justify-between bg-black/20 p-2 rounded-lg border border-red-500/10">
+                        <span class="text-[10px] text-slate-300 font-mono">ACS/TR-069</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="ab-acs" onchange="saveAutoBlockConfig()" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600"></div>
+                        </label>
+                    </div>
+                    <div class="flex items-center justify-between bg-black/20 p-2 rounded-lg border border-red-500/10">
+                        <span class="text-[10px] text-slate-300 font-mono">CRYPTO MINER</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="ab-miner" onchange="saveAutoBlockConfig()" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600"></div>
+                        </label>
+                    </div>
+                    <div class="flex items-center justify-between bg-black/20 p-2 rounded-lg border border-red-500/10">
+                        <span class="text-[10px] text-slate-300 font-mono">C2 / BOTNET</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="ab-c2" onchange="saveAutoBlockConfig()" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-600"></div>
+                        </label>
+                    </div>
+                </div>
+                <p class="text-[9px] text-slate-500 mt-2 italic">When enabled, the system will automatically block domains of these types every 10 minutes.</p>
+            </div>
+
+            <!-- Keyword Blocking Panel -->
+            <div class="bg-blue-900/10 border border-blue-500/20 p-3 rounded-xl mb-2 shrink-0">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-xs font-orbitron text-blue-400">KEYWORD BLOCKING</h3>
+                    <span class="text-[9px] text-slate-500">Blocks domains containing these words</span>
+                </div>
+                <div class="flex gap-2 mb-2">
+                    <input type="text" id="new-keyword" placeholder="Enter keyword (e.g. acs, toto)" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
+                    <button onclick="addKeyword()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-[10px] rounded-lg transition font-orbitron">ADD</button>
+                </div>
+                <div id="keyword-list" class="flex flex-wrap gap-2 max-h-[60px] overflow-y-auto custom-scrollbar p-1">
+                    <!-- Keywords injected here -->
+                    <span class="text-[10px] text-slate-500">Loading...</span>
+                </div>
+            </div>
+            
+            <!-- View List Button -->
+            <button onclick="openACSListModal()" class="w-full py-4 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-xl transition flex items-center justify-center gap-3 group">
+                <div class="p-2 bg-slate-700 rounded-lg group-hover:bg-slate-600 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                    </svg>
+                </div>
+                <div class="text-left">
+                    <span class="block text-xs font-orbitron text-white">VIEW THREAT CANDIDATES</span>
+                    <span class="block text-[10px] text-slate-400">Click to open full detailed list</span>
+                </div>
+            </button>
+            
+            <div class="bg-yellow-900/20 border border-yellow-500/20 p-4 rounded-xl mt-auto">
+                <p class="text-[10px] text-yellow-500">⚠ <strong>WARNING:</strong> Review before blocking. Some domains might be false positives (e.g. legitimate crypto wallets or ISP tools).</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACS List Modal (New) -->
+    <div id="acs-list-modal" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md hidden">
+        <div class="glass p-6 rounded-3xl w-full max-w-5xl h-[90vh] flex flex-col border border-red-500/30">
+            <div class="flex justify-between items-center mb-4 border-b border-white/10 pb-4">
+                <div>
+                    <h2 class="text-xl font-orbitron text-white">THREAT CANDIDATES</h2>
+                    <p class="text-red-400 text-[10px] tracking-widest uppercase">LIVE ANALYSIS RESULTS</p>
+                </div>
+                <button onclick="closeACSListModal()" class="text-slate-400 hover:text-white transition p-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <div class="flex justify-between items-center mb-4 gap-4 shrink-0">
+                <div class="relative flex-1">
+                    <input type="text" id="acs-search" onkeyup="filterACSList()" placeholder="Search domain..." class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-xs text-white focus:outline-none focus:border-red-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-slate-500 absolute right-3 top-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                </div>
+                <div class="flex gap-2">
+                    <button id="btn-bulk-block" onclick="blockSelectedACS()" class="hidden px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-[10px] font-bold rounded-lg transition shadow-lg shadow-red-900/20 font-orbitron">BLOCK SELECTED</button>
+                    <button onclick="loadACSCandidates()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg border border-slate-600 transition flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        REFRESH
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-slate-900/50 rounded-xl border border-slate-700/50 flex-1 overflow-hidden flex flex-col min-h-0">
+                <div class="overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                    <table class="w-full text-left text-xs">
+                        <thead class="text-slate-500 border-b border-slate-700/50 sticky top-0 bg-slate-900 z-10 shadow-lg">
+                            <tr>
+                                <th class="py-3 pl-4 w-10 bg-slate-900"><input type="checkbox" id="acs-select-all" onclick="toggleSelectAllACS()" class="rounded bg-slate-800 border-slate-600 text-red-600 focus:ring-0 cursor-pointer w-4 h-4"></th>
+                                <th class="py-3 pl-2 bg-slate-900 font-orbitron text-slate-400">DOMAIN</th>
+                                <th class="py-3 text-center bg-slate-900 font-orbitron text-slate-400">THREAT TYPE</th>
+                                <th class="py-3 text-right bg-slate-900 font-orbitron text-slate-400">HITS</th>
+                                <th class="py-3 text-right pr-4 bg-slate-900 font-orbitron text-slate-400">ACTION</th>
+                            </tr>
+                        </thead>
+                        <tbody id="acs-table-body" class="text-slate-300 font-mono">
+                            <tr><td colspan="5" class="text-center py-12 text-slate-500">Click Refresh to scan...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
+        // --- LICENSE GENERATOR ---
+        function openLicenseGenerator() {
+            // Create modal if not exists
+            if (!document.getElementById('license-gen-modal')) {
+                const modal = document.createElement('div');
+                modal.id = 'license-gen-modal';
+                modal.className = 'fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md hidden';
+                modal.innerHTML = `
+                    <div class="glass p-8 rounded-3xl w-full max-w-4xl h-[80vh] flex flex-col border border-yellow-500/30 shadow-2xl relative">
+                        <button onclick="document.getElementById('license-gen-modal').classList.add('hidden')" class="absolute top-4 right-4 text-slate-500 hover:text-white transition">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                        
+                        <div class="mb-6 border-b border-white/10 pb-4">
+                            <h2 class="text-2xl font-orbitron text-yellow-500">LICENSE GENERATOR</h2>
+                            <p class="text-xs text-slate-400 tracking-widest uppercase">CREATE & MANAGE CLIENT LICENSES</p>
+                        </div>
+
+                        <div class="flex gap-4 mb-6">
+                            <button onclick="switchLicenseTab('create')" id="tab-create" class="px-4 py-2 rounded-lg bg-yellow-600/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-600/40 transition font-orbitron text-xs">CREATE NEW</button>
+                            <button onclick="switchLicenseTab('list')" id="tab-list" class="px-4 py-2 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition font-orbitron text-xs">MANAGE LICENSES</button>
+                        </div>
+
+                        <div id="license-content-create" class="flex-1 overflow-y-auto custom-scrollbar">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div class="space-y-4">
+                                    <div class="space-y-2">
+                                        <label class="text-xs font-orbitron text-slate-400">CLIENT NAME</label>
+                                        <input type="text" id="gen-client" placeholder="e.g. PT MARS DATA" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 font-mono">
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label class="text-xs font-orbitron text-slate-400">PLAN TYPE</label>
+                                        <select id="gen-plan" onchange="updatePlanFeatures()" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 font-mono">
+                                            <option value="PRO">PRO (Full Features)</option>
+                                            <option value="ENTERPRISE">ENTERPRISE (Multi-node)</option>
+                                            <option value="BASIC">BASIC (Standard)</option>
+                                        </select>
+                                    </div>
+                                    <div id="plan-features-preview" class="p-3 bg-slate-800/50 rounded-lg border border-slate-700/50 min-h-[100px]">
+                                        <p class="text-[10px] text-slate-400 mb-2 font-orbitron">INCLUDED FEATURES:</p>
+                                        <ul id="feature-list" class="text-[10px] text-slate-300 space-y-1 pl-4 list-disc marker:text-yellow-500">
+                                            <li>Loading features...</li>
+                                        </ul>
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label class="text-xs font-orbitron text-slate-400">DURATION (DAYS)</label>
+                                        <select id="gen-duration" class="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500 font-mono">
+                                            <option value="365">1 Year (365 Days)</option>
+                                            <option value="730">2 Years (730 Days)</option>
+                                            <option value="30">1 Month (30 Days)</option>
+                                            <option value="9999">LIFETIME</option>
+                                        </select>
+                                    </div>
+                                    <button onclick="generateLicense()" class="w-full py-4 bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-500 hover:to-orange-500 text-white font-bold rounded-xl transition shadow-lg shadow-orange-900/20 font-orbitron mt-4">GENERATE LICENSE KEY</button>
+                                </div>
+                                
+                                <div class="bg-black/40 border border-white/5 rounded-xl p-6 flex flex-col items-center justify-center text-center">
+                                    <div id="gen-result" class="hidden w-full">
+                                        <div class="text-xs text-slate-500 mb-2 font-mono">GENERATED KEY</div>
+                                        <div class="relative group w-full mb-4">
+                                            <code id="new-license-key" class="block w-full bg-slate-900 p-4 rounded-lg text-yellow-400 font-mono text-lg break-all border border-yellow-500/30"></code>
+                                            <button onclick="copyText('new-license-key')" class="absolute top-2 right-2 text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400 hover:text-white transition">COPY</button>
+                                        </div>
+                                        <div class="text-xs text-slate-400 space-y-1 font-mono text-left pl-2 border-l-2 border-slate-700">
+                                            <p>Client: <span id="res-client" class="text-white"></span></p>
+                                            <p>Plan: <span id="res-plan" class="text-white"></span></p>
+                                            <p>Expires: <span id="res-expiry" class="text-white"></span></p>
+                                        </div>
+                                    </div>
+                                    <div id="gen-placeholder" class="text-slate-600">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto mb-4 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                                        </svg>
+                                        <p class="text-xs font-mono">Fill details and click Generate</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="license-content-list" class="hidden flex-1 overflow-y-auto custom-scrollbar">
+                             <table class="w-full text-left text-xs">
+                                <thead class="text-slate-500 border-b border-slate-700/50 sticky top-0 bg-slate-900 z-10">
+                                    <tr>
+                                        <th class="py-3 pl-4 bg-slate-900 font-orbitron text-slate-400">CLIENT</th>
+                                        <th class="py-3 bg-slate-900 font-orbitron text-slate-400">PLAN</th>
+                                        <th class="py-3 bg-slate-900 font-orbitron text-slate-400">KEY</th>
+                                        <th class="py-3 bg-slate-900 font-orbitron text-slate-400">EXPIRY</th>
+                                        <th class="py-3 text-right pr-4 bg-slate-900 font-orbitron text-slate-400">ACTION</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="license-list-body" class="text-slate-300 font-mono">
+                                    <!-- List items -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            }
+            document.getElementById('license-gen-modal').classList.remove('hidden');
+            switchLicenseTab('create');
+            updatePlanFeatures(); // Load initial features
+        }
+
+        function switchLicenseTab(tab) {
+            const btnCreate = document.getElementById('tab-create');
+            const btnList = document.getElementById('tab-list');
+            const contentCreate = document.getElementById('license-content-create');
+            const contentList = document.getElementById('license-content-list');
+
+            if (tab === 'create') {
+                btnCreate.className = "px-4 py-2 rounded-lg bg-yellow-600/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-600/40 transition font-orbitron text-xs";
+                btnList.className = "px-4 py-2 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition font-orbitron text-xs";
+                contentCreate.classList.remove('hidden');
+                contentList.classList.add('hidden');
+            } else {
+                btnList.className = "px-4 py-2 rounded-lg bg-yellow-600/20 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-600/40 transition font-orbitron text-xs";
+                btnCreate.className = "px-4 py-2 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition font-orbitron text-xs";
+                contentList.classList.remove('hidden');
+                contentCreate.classList.add('hidden');
+                loadLicenses();
+            }
+        }
+
+        async function updatePlanFeatures() {
+            const plan = document.getElementById('gen-plan').value;
+            const list = document.getElementById('feature-list');
+            
+            try {
+                const res = await fetch(`/api/license/features?plan=${plan}`);
+                const data = await res.json();
+                
+                if (data.status === 'success' && data.features.length > 0) {
+                    list.innerHTML = data.features.map(f => `<li>${f}</li>`).join('');
+                } else {
+                    list.innerHTML = '<li>No features defined</li>';
+                }
+            } catch (e) {
+                list.innerHTML = '<li>Error loading features</li>';
+            }
+        }
+
+        async function generateLicense() {
+            const client = document.getElementById('gen-client').value.trim();
+            const plan = document.getElementById('gen-plan').value;
+            const duration = document.getElementById('gen-duration').value;
+            
+            if (!client) {
+                alert('Please enter Client Name');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/license/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({client_name: client, plan: plan, duration: duration})
+                });
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    const lic = data.license;
+                    document.getElementById('new-license-key').innerText = lic.key;
+                    document.getElementById('res-client').innerText = lic.client_name;
+                    document.getElementById('res-plan').innerText = lic.plan;
+                    document.getElementById('res-expiry').innerText = lic.expiry_date;
+                    
+                    document.getElementById('gen-placeholder').classList.add('hidden');
+                    document.getElementById('gen-result').classList.remove('hidden');
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+        }
+
+        async function loadLicenses() {
+            const tbody = document.getElementById('license-list-body');
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500">Loading...</td></tr>';
+            
+            try {
+                const res = await fetch('/api/license/list');
+                const data = await res.json();
+                
+                if (data.status === 'success' && data.licenses.length > 0) {
+                    tbody.innerHTML = data.licenses.map(lic => `
+                        <tr class="border-b border-slate-800/50 hover:bg-slate-800/30 transition">
+                            <td class="py-3 pl-4 text-white">${lic.client_name}</td>
+                            <td class="py-3"><span class="px-2 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-400">${lic.plan}</span></td>
+                            <td class="py-3 font-mono text-[10px] text-yellow-500/80">${lic.key}</td>
+                            <td class="py-3 text-[10px] text-slate-400">${lic.expiry_date}</td>
+                            <td class="py-3 text-right pr-4">
+                                <button onclick="revokeLicense('${lic.key}')" class="text-red-500 hover:text-red-400 text-[10px] uppercase">REVOKE</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500">No licenses generated yet.</td></tr>';
+                }
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-red-500">Failed to load.</td></tr>';
+            }
+        }
+
+        async function revokeLicense(key) {
+            if (!confirm('Are you sure you want to revoke this license?')) return;
+            
+            try {
+                const res = await fetch('/api/license/revoke', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: key})
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    loadLicenses();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+        }
+
+
         // --- GUARDIAN CONFIG FUNCTIONS ---
         function openGuardianModal() {
             document.getElementById('guardian-modal').classList.remove('hidden');
@@ -995,59 +1467,146 @@
 
         // Combined Traffic Chart (SERVFAIL + Blocklist)
         const combinedCtx = document.getElementById('combinedTrafficChart').getContext('2d');
+        
+        // Gradient for Servfail
+        const servfailGradient = combinedCtx.createLinearGradient(0, 0, 0, 320);
+        servfailGradient.addColorStop(0, 'rgba(239, 68, 68, 0.25)'); // Red
+        servfailGradient.addColorStop(0.5, 'rgba(239, 68, 68, 0.1)');
+        servfailGradient.addColorStop(1, 'rgba(239, 68, 68, 0.01)');
+
+        // Gradient for Blocked
+        const blockedGradient = combinedCtx.createLinearGradient(0, 0, 0, 320);
+        blockedGradient.addColorStop(0, 'rgba(245, 158, 11, 0.25)'); // Amber
+        blockedGradient.addColorStop(0.5, 'rgba(245, 158, 11, 0.1)');
+        blockedGradient.addColorStop(1, 'rgba(245, 158, 11, 0.01)');
+
+        // Gradient for Threats
+        const threatGradient = combinedCtx.createLinearGradient(0, 0, 0, 320);
+        threatGradient.addColorStop(0, 'rgba(168, 85, 247, 0.25)'); // Purple
+        threatGradient.addColorStop(0.5, 'rgba(168, 85, 247, 0.1)');
+        threatGradient.addColorStop(1, 'rgba(168, 85, 247, 0.01)');
+
         const combinedTrafficChart = new Chart(combinedCtx, {
-            type: 'bar',
+            type: 'line',
             data: { 
                 labels: [], 
                 datasets: [
                     { 
                         label: 'SERVFAIL Errors', 
                         data: [], 
-                        backgroundColor: 'rgba(239, 68, 68, 0.6)',
                         borderColor: '#ef4444',
-                        borderWidth: 2,
-                        borderRadius: 6,
-                        barThickness: 'flex',
-                        maxBarThickness: 40
+                        backgroundColor: servfailGradient,
+                        borderWidth: 2.5,
+                        tension: 0.5,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointBorderWidth: 0,
+                        pointHitRadius: 10
                     },
                     { 
                         label: 'Blocked Domains', 
                         data: [], 
-                        backgroundColor: 'rgba(251, 191, 36, 0.6)',
-                        borderColor: '#fbbf24',
+                        borderColor: '#f59e0b',
+                        backgroundColor: blockedGradient,
                         borderWidth: 2,
-                        borderRadius: 6,
-                        barThickness: 'flex',
-                        maxBarThickness: 40
+                        tension: 0.5,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointBorderWidth: 0,
+                        pointHitRadius: 10
+                    },
+                    { 
+                        label: 'Cyber Threats', 
+                        data: [], 
+                        borderColor: '#a855f7', // Purple-500
+                        backgroundColor: threatGradient,
+                        borderWidth: 2,
+                        tension: 0.5,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointBorderWidth: 0,
+                        pointHitRadius: 10
                     }
                 ] 
             },
             options: { 
-                indexAxis: 'y',
                 responsive: true, 
                 maintainAspectRatio: false,
+                animation: {
+                    duration: 300,
+                    easing: 'easeInOutQuart'
+                },
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
                 plugins: {
                     legend: { 
                         display: true,
-                        labels: { color: '#94a3b8' } 
+                        position: 'top',
+                        labels: {
+                            color: '#94a3b8',
+                            font: { size: 11, family: 'Orbitron', weight: '600' },
+                            boxWidth: 12,
+                            padding: 16,
+                            usePointStyle: true,
+                            pointStyle: 'circle'
+                        }
                     },
                     tooltip: {
+                        enabled: true,
                         backgroundColor: 'rgba(5, 11, 24, 0.95)',
-                        borderColor: '#64748b',
+                        borderColor: '#ef4444',
                         borderWidth: 1,
-                        bodyColor: '#cbd5e1',
-                        titleColor: '#f8fafc'
+                        titleColor: '#f59e0b',
+                        bodyColor: '#64748b',
+                        boxPadding: 8,
+                        titleFont: { size: 11, family: 'Orbitron', weight: 'bold' },
+                        bodyFont: { size: 10 },
+                        padding: 12,
+                        displayColors: true,
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y;
+                            }
+                        }
                     }
                 },
                 scales: { 
                     x: { 
-                        beginAtZero: true,
-                        grid: { color: 'rgba(255, 255, 255, 0.06)' },
-                        ticks: { color: '#94a3b8' }
+                        grid: { 
+                            display: true,
+                            color: 'rgba(255, 255, 255, 0.03)',
+                            drawBorder: false
+                        },
+                        ticks: { 
+                            color: '#64748b', 
+                            font: { size: 10, weight: '500', family: 'monospace' },
+                            maxRotation: 45,
+                            minRotation: 0
+                        }
                     },
                     y: { 
-                        grid: { display: false },
-                        ticks: { color: '#94a3b8', font: { size: 11 } }
+                        beginAtZero: true,
+                        position: 'left',
+                        grid: { 
+                            color: 'rgba(255, 255, 255, 0.06)',
+                            drawBorder: false
+                        },
+                        ticks: { 
+                            color: '#ef4444', 
+                            font: { size: 11, weight: '600' },
+                            padding: 8
+                        },
+                        title: {
+                            display: true,
+                            text: '░ COUNT ░',
+                            color: '#ef4444',
+                            font: { size: 10, family: 'Orbitron', weight: 'bold' }
+                        }
                     }
                 } 
             }
@@ -1205,9 +1764,60 @@
             const primaryIp = window.primaryIP || location.hostname;
             const syncToken = window.syncToken || 'YOUR_TOKEN';
             
-            document.getElementById('cmd-copy').innerText = `scp user@${primaryIp}:/home/dns/setup_secondary.sh .`;
-            document.getElementById('cmd-install').innerText = `sudo bash setup_secondary.sh ${primaryIp} ${syncToken}`;
-            
+            const steps = `
+<div class="space-y-3 text-left">
+    <div class="bg-black/30 p-3 rounded border border-white/5">
+        <p class="text-[10px] text-orange-400 font-bold mb-1">1. PREPARE VM (UBUNTU 22.04/LXC)</p>
+        <code class="block text-[9px] text-slate-300 font-mono select-all">
+sudo systemctl stop systemd-resolved
+sudo systemctl disable systemd-resolved
+sudo rm -f /etc/resolv.conf
+echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
+        </code>
+    </div>
+
+    <div class="bg-black/30 p-3 rounded border border-white/5">
+        <p class="text-[10px] text-blue-400 font-bold mb-1">2. INSTALL & SYNC</p>
+        <code class="block text-[9px] text-slate-300 font-mono select-all">
+scp user@${primaryIp}:/home/dns/setup_secondary.sh .
+sudo bash setup_secondary.sh ${primaryIp} ${syncToken}
+        </code>
+    </div>
+
+    <div class="bg-black/30 p-3 rounded border border-white/5">
+        <p class="text-[10px] text-green-400 font-bold mb-1">3. FIX CONNECTION (IF FAILED)</p>
+        <code class="block text-[9px] text-slate-300 font-mono select-all">
+# Fix for LXC/Connection Issues
+sudo ip link set dev eth0 mtu 1300
+echo "query-port=0" | sudo tee -a /etc/dnsmasq.conf
+sudo systemctl restart dnsmasq
+        </code>
+    </div>
+
+    <div class="bg-black/30 p-3 rounded border border-white/5">
+        <p class="text-[10px] text-purple-400 font-bold mb-1">4. ENABLE RECURSIVE MODE (OPTIONAL)</p>
+        <p class="text-[8px] text-slate-400 mb-1">Use this if you want Secondary to be an independent resolver (hide Google).</p>
+        <code class="block text-[9px] text-slate-300 font-mono select-all">
+# Install & Config Unbound on Port 5335
+sudo apt install -y unbound
+echo "server:
+    interface: 127.0.0.1
+    port: 5335
+    do-ip4: yes
+    do-udp: yes
+    do-tcp: yes
+    access-control: 127.0.0.0/8 allow" | sudo tee /etc/unbound/unbound.conf.d/pi-hole.conf
+sudo systemctl restart unbound
+
+# Point Dnsmasq to Local Unbound
+sudo sed -i '/server=8.8.8.8/d' /etc/dnsmasq.conf
+echo "server=127.0.0.1#5335" | sudo tee -a /etc/dnsmasq.conf
+sudo systemctl restart dnsmasq
+        </code>
+    </div>
+</div>`;
+
+            document.getElementById('secondary-setup-content').innerHTML = steps;
             document.getElementById('secondary-setup-modal').classList.remove('hidden');
         }
 
@@ -1343,35 +1953,49 @@
 
         async function updateCombinedTraffic() {
             try {
-                const [resServfail, resBlocklist] = await Promise.all([
+                const [resServfail, resBlocklist, resThreats] = await Promise.all([
                     fetch('/api/traffic/servfail'),
-                    fetch('/api/traffic/blocklist')
+                    fetch('/api/traffic/blocklist'),
+                    fetch('/api/traffic/threats')
                 ]);
 
                 if (resServfail.status === 401 || resBlocklist.status === 401) return;
 
                 const servfailData = await resServfail.json();
                 const blocklistData = await resBlocklist.json();
+                
+                let threatData = { top_domains: [], summary: { total_threats: 0 } };
+                if (resThreats.ok) {
+                    threatData = await resThreats.json();
+                }
 
                 // Process data to merge domains
                 const servfailDomains = servfailData.top_domains || [];
                 const blocklistDomains = blocklistData.top_domains || [];
+                const threatDomains = threatData.top_domains || [];
                 
                 // Create a map of all unique domains
                 const domainMap = new Map();
                 
                 servfailDomains.forEach(d => {
                     if (!domainMap.has(d.domain)) {
-                        domainMap.set(d.domain, { servfail: 0, blocked: 0 });
+                        domainMap.set(d.domain, { servfail: 0, blocked: 0, threat: 0 });
                     }
                     domainMap.get(d.domain).servfail = d.errors;
                 });
                 
                 blocklistDomains.forEach(d => {
                     if (!domainMap.has(d.domain)) {
-                        domainMap.set(d.domain, { servfail: 0, blocked: 0 });
+                        domainMap.set(d.domain, { servfail: 0, blocked: 0, threat: 0 });
                     }
                     domainMap.get(d.domain).blocked = d.blocked;
+                });
+
+                threatDomains.forEach(d => {
+                    if (!domainMap.has(d.domain)) {
+                        domainMap.set(d.domain, { servfail: 0, blocked: 0, threat: 0 });
+                    }
+                    domainMap.get(d.domain).threat = d.threat;
                 });
                 
                 // Convert map to array and sort by total activity
@@ -1379,22 +2003,43 @@
                     domain,
                     servfail: counts.servfail,
                     blocked: counts.blocked,
-                    total: counts.servfail + counts.blocked
+                    threat: counts.threat,
+                    total: counts.servfail + counts.blocked + counts.threat
                 })).sort((a, b) => b.total - a.total).slice(0, 10); // Top 10 combined
 
                 const labels = mergedData.map(d => d.domain);
                 const servfailCounts = mergedData.map(d => d.servfail);
                 const blockedCounts = mergedData.map(d => d.blocked);
+                const threatCounts = mergedData.map(d => d.threat);
 
                 combinedTrafficChart.data.labels = labels;
                 combinedTrafficChart.data.datasets[0].data = servfailCounts;
                 combinedTrafficChart.data.datasets[1].data = blockedCounts;
+                combinedTrafficChart.data.datasets[2].data = threatCounts;
                 combinedTrafficChart.update('active');
                 
                 const totalServfail = servfailData.summary.total_servfail_errors;
                 const totalBlocked = blocklistData.summary.total_blocked;
+                const totalThreats = threatData.summary.total_threats;
+
                 document.getElementById('combined-count').innerText = 
-                    `${totalServfail} errors / ${totalBlocked} blocked`;
+                    `${totalServfail} err / ${totalBlocked} blk / ${totalThreats} threat`;
+
+                // Update Domain List Table (in Popup)
+                const tbody = document.getElementById('analysis-list-body');
+                if (tbody) {
+                    tbody.innerHTML = mergedData.map(d => `
+                        <tr class="hover:bg-white/5 transition border-b border-white/5">
+                            <td class="py-2 px-4 text-slate-300">${d.domain}</td>
+                            <td class="py-2 px-4 text-right">
+                                ${d.servfail > 0 ? '<span class="text-[9px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/30">SERVFAIL</span>' : ''}
+                                ${d.blocked > 0 ? '<span class="text-[9px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded border border-amber-500/30 ml-1">BLOCKED</span>' : ''}
+                                ${d.threat > 0 ? '<span class="text-[9px] bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded border border-purple-500/30 ml-1">THREAT</span>' : ''}
+                            </td>
+                            <td class="py-2 px-4 text-right font-orbitron text-slate-400">${d.total}</td>
+                        </tr>
+                    `).join('');
+                }
 
             } catch (e) { console.error(e); }
             
@@ -1429,15 +2074,44 @@
         document.addEventListener('MSFullscreenChange', handleFullscreenChange);
 
         function handleFullscreenChange() {
+            // Handle Traffic Analysis
             const elem = document.getElementById('traffic-container');
-            if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
-                elem.classList.remove('fullscreen-mode');
-            } else {
+            if (document.fullscreenElement === elem || document.webkitFullscreenElement === elem) {
                 elem.classList.add('fullscreen-mode');
+            } else {
+                elem.classList.remove('fullscreen-mode');
             }
-            if (trafficChart) {
-                trafficChart.resize();
+            
+            // Handle Combined Analysis
+            const combinedElem = document.getElementById('combined-traffic-container');
+            const isCombinedFullscreen = (document.fullscreenElement === combinedElem || document.webkitFullscreenElement === combinedElem);
+            
+            if (isCombinedFullscreen) {
+                combinedElem.classList.add('fullscreen-mode');
+                // Show close button
+                combinedElem.querySelector('.fullscreen-close-btn').classList.remove('hidden');
+                combinedElem.querySelector('.fullscreen-btn-wrapper').classList.add('hidden'); // Hide expand button
+            } else {
+                combinedElem.classList.remove('fullscreen-mode');
+                // Hide close button
+                if (combinedElem.querySelector('.fullscreen-close-btn')) {
+                    combinedElem.querySelector('.fullscreen-close-btn').classList.add('hidden');
+                }
+                if (combinedElem.querySelector('.fullscreen-btn-wrapper')) {
+                    combinedElem.querySelector('.fullscreen-btn-wrapper').classList.remove('hidden');
+                }
             }
+
+            if (trafficChart) trafficChart.resize();
+            if (combinedTrafficChart) combinedTrafficChart.resize();
+        }
+
+        function openAnalysisListModal() {
+            document.getElementById('analysis-list-modal').classList.remove('hidden');
+        }
+
+        function closeAnalysisListModal() {
+            document.getElementById('analysis-list-modal').classList.add('hidden');
         }
 
         function updateMetricValue(id, val) {
@@ -1578,25 +2252,19 @@
 
         async function toggleTrust() {
             const trust_enabled = document.getElementById('trust-toggle').checked;
-            const trust_ip = document.getElementById('trust-ip-input').value;
+            // No IP input needed for local filtering
             
-            if (trust_enabled && !trust_ip) {
-                alert('Please enter Trust DNS IP first!');
-                document.getElementById('trust-toggle').checked = false;
-                return;
-            }
-
             try {
                 const response = await fetch('/api/action', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ type: 'toggle_trust', trust_enabled, trust_ip })
+                    body: JSON.stringify({ type: 'toggle_trust', trust_enabled })
                 });
                 const result = await response.json();
-                alert('DNS Trust ' + (trust_enabled ? 'Enabled (' + trust_ip + ')' : 'Disabled'));
+                alert('Internet Positif (Local) ' + (trust_enabled ? 'ENABLED' : 'DISABLED'));
                 updateMetrics();
             } catch (e) {
-                alert('Failed to update DNS Trust');
+                alert('Failed to update Internet Positif settings');
             }
         }
 
@@ -1729,15 +2397,24 @@
         }
 
         // --- DOMAIN LIST MODAL FUNCTIONS ---
+        let currentListDomains = [];
+        let currentListType = '';
+
         async function openListModal(type) {
+            currentListType = type;
             const modal = document.getElementById('list-modal');
             const title = document.getElementById('list-modal-title');
             const subtitle = document.getElementById('list-modal-subtitle');
             const content = document.getElementById('list-modal-content');
+            const searchInput = document.getElementById('list-search');
 
             title.innerText = type.toUpperCase() + ' LIST';
             subtitle.innerText = 'MANAGE SYSTEM ' + type.toUpperCase();
-            content.innerHTML = '<p class="text-[10px] text-slate-500 text-center py-4 animate-pulse font-orbitron">FETCHING DATABASE...</p>';
+            searchInput.value = ''; // Clear search
+            document.getElementById('list-select-all').checked = false;
+            updateListBulkButton();
+
+            content.innerHTML = '<tr><td colspan="3" class="text-center py-8 text-slate-500 animate-pulse font-orbitron">FETCHING DATABASE...</td></tr>';
             modal.classList.remove('hidden');
 
             try {
@@ -1745,25 +2422,100 @@
                 const data = await res.json();
                 
                 if (data.status === 'success') {
-                    if (data.domains.length === 0) {
-                        content.innerHTML = '<p class="text-xs text-slate-500 text-center py-8">No entries found in this list.</p>';
-                    } else {
-                        content.innerHTML = data.domains.map(domain => `
-                            <div class="flex justify-between items-center bg-white/5 border border-white/5 rounded-xl px-4 py-3 hover:bg-white/10 transition group">
-                                <span class="text-xs font-mono text-white">${domain}</span>
-                                <button onclick="removeDomainFromList('${type}', '${domain}')" class="text-red-500/50 hover:text-red-500 transition-all p-2 hover:scale-110">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                </button>
-                            </div>
-                        `).join('');
-                    }
+                    currentListDomains = data.domains;
+                    renderListModal(currentListDomains);
                 } else {
-                    content.innerHTML = `<p class="text-red-400 text-xs text-center py-8">Error: ${data.message}</p>`;
+                    content.innerHTML = `<tr><td colspan="3" class="text-center py-8 text-red-400">Error: ${data.message}</td></tr>`;
                 }
             } catch (e) {
-                content.innerHTML = '<p class="text-red-400 text-xs text-center py-8">Connection failed.</p>';
+                content.innerHTML = '<tr><td colspan="3" class="text-center py-8 text-red-400">Connection failed.</td></tr>';
+            }
+        }
+
+        function renderListModal(domains) {
+            const content = document.getElementById('list-modal-content');
+            
+            if (domains.length === 0) {
+                content.innerHTML = '<tr><td colspan="3" class="text-center py-8 text-slate-500">No entries found.</td></tr>';
+                return;
+            }
+
+            content.innerHTML = domains.map(domain => `
+                <tr class="border-b border-slate-800/50 hover:bg-slate-800/30 transition group">
+                    <td class="py-2 pl-4"><input type="checkbox" value="${domain}" class="list-checkbox rounded bg-slate-800 border-slate-600 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4" onclick="updateListBulkButton()"></td>
+                    <td class="py-2 pl-2 text-xs font-mono text-white">${domain}</td>
+                    <td class="py-2 text-right pr-4">
+                        <button onclick="removeDomainFromList('${currentListType}', '${domain}')" class="text-red-500/50 hover:text-red-500 transition-all p-2 hover:scale-110">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function filterListModal() {
+            const query = document.getElementById('list-search').value.toLowerCase();
+            const filtered = currentListDomains.filter(domain => domain.toLowerCase().includes(query));
+            renderListModal(filtered);
+            updateListBulkButton();
+        }
+
+        function toggleSelectListModal() {
+            const master = document.getElementById('list-select-all');
+            const checkboxes = document.querySelectorAll('.list-checkbox');
+            checkboxes.forEach(cb => cb.checked = master.checked);
+            updateListBulkButton();
+        }
+
+        function updateListBulkButton() {
+            const count = document.querySelectorAll('.list-checkbox:checked').length;
+            const btn = document.getElementById('btn-list-bulk-delete');
+            if (count > 0) {
+                btn.classList.remove('hidden');
+                btn.innerText = `DELETE SELECTED (${count})`;
+            } else {
+                btn.classList.add('hidden');
+            }
+        }
+
+        async function deleteSelectedListItems() {
+            const checkboxes = document.querySelectorAll('.list-checkbox:checked');
+            const domains = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (domains.length === 0) return;
+            
+            if (!confirm(`Delete ${domains.length} domains from ${currentListType.toUpperCase()}?`)) return;
+
+            const btn = document.getElementById('btn-list-bulk-delete');
+            const originalText = btn.innerText;
+            btn.innerText = "PROCESSING...";
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: currentListType,
+                        action: 'remove',
+                        domains: domains
+                    })
+                });
+                
+                const result = await res.json();
+                if (result.status === 'success') {
+                    // Refresh
+                    openListModal(currentListType);
+                } else {
+                    alert('Failed: ' + result.message);
+                }
+            } catch (e) {
+                alert('Connection error');
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
             }
         }
 
@@ -1802,6 +2554,278 @@
         fetchBannedIps();
         fetchSyncInfo();
         setInterval(fetchBannedIps, 10000);
+        // --- ACS BOTNET ANALYSIS ---
+        function openACSModal() {
+            document.getElementById('acs-modal').classList.remove('hidden');
+            loadAutoBlockConfig();
+            loadKeywords();
+        }
+
+        function openACSListModal() {
+            document.getElementById('acs-list-modal').classList.remove('hidden');
+            loadACSCandidates();
+        }
+
+        function exportThreatsPDF() {
+            window.open('/api/export/threats/pdf?limit=500', '_blank');
+        }
+
+        function closeACSListModal() {
+            document.getElementById('acs-list-modal').classList.add('hidden');
+        }
+
+        async function loadKeywords() {
+            try {
+                const res = await fetch('/api/threat/keywords');
+                const data = await res.json();
+                const container = document.getElementById('keyword-list');
+                
+                if (data.keywords && data.keywords.length > 0) {
+                    container.innerHTML = data.keywords.map(kw => `
+                        <div class="flex items-center gap-1 bg-slate-800 border border-slate-700 rounded px-2 py-0.5 group hover:border-blue-500 transition">
+                            <span class="text-[9px] text-white font-mono">${kw}</span>
+                            <button onclick="deleteKeyword('${kw}')" class="text-slate-500 hover:text-red-400 text-[10px] leading-none">×</button>
+                        </div>
+                    `).join('');
+                } else {
+                    container.innerHTML = '<span class="text-[9px] text-slate-500 italic">No keywords defined</span>';
+                }
+            } catch (e) {
+                console.error("Error loading keywords:", e);
+            }
+        }
+
+        async function addKeyword() {
+            const input = document.getElementById('new-keyword');
+            const keyword = input.value.trim();
+            if (!keyword) return;
+            
+            try {
+                const res = await fetch('/api/threat/keywords', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({keyword: keyword})
+                });
+                if (res.ok) {
+                    input.value = '';
+                    loadKeywords();
+                    // loadACSCandidates(); // Don't auto-reload list as it is now in separate modal
+                } else {
+                    alert('Failed to add keyword');
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+        }
+
+        async function deleteKeyword(keyword) {
+            if (!confirm(`Delete keyword "${keyword}"?`)) return;
+            
+            try {
+                const res = await fetch('/api/threat/keywords', {
+                    method: 'DELETE',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({keyword: keyword})
+                });
+                if (res.ok) {
+                    loadKeywords();
+                    // loadACSCandidates(); // Don't auto-reload list
+                } else {
+                    alert('Failed to delete keyword');
+                }
+            } catch (e) {
+                alert('Connection error');
+            }
+        }
+
+        function closeACSModal() {
+            document.getElementById('acs-modal').classList.add('hidden');
+        }
+
+        async function loadAutoBlockConfig() {
+            try {
+                const res = await fetch('/api/autoblock/config');
+                const data = await res.json();
+                
+                document.getElementById('ab-acs').checked = data['ACS/TR-069 (Botnet)'] || false;
+                document.getElementById('ab-miner').checked = data['CRYPTO MINER'] || false;
+                document.getElementById('ab-c2').checked = data['C2 / BOTNET'] || false;
+            } catch (e) {
+                console.error("Error loading autoblock config:", e);
+            }
+        }
+
+        async function saveAutoBlockConfig() {
+            const config = {
+                'ACS/TR-069 (Botnet)': document.getElementById('ab-acs').checked,
+                'CRYPTO MINER': document.getElementById('ab-miner').checked,
+                'C2 / BOTNET': document.getElementById('ab-c2').checked
+            };
+            
+            try {
+                await fetch('/api/autoblock/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+            } catch (e) {
+                console.error("Error saving autoblock config:", e);
+                alert("Failed to save settings");
+            }
+        }
+
+        let acsCandidates = []; // Global variable to store current ACS data
+
+        async function loadACSCandidates() {
+            const tbody = document.getElementById('acs-table-body');
+            const searchInput = document.getElementById('acs-search');
+            // Don't clear if user is just typing search
+            if (!searchInput.value) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500 animate-pulse">Scanning logs for threats...</td></tr>';
+            }
+            
+            try {
+                const response = await fetch('/api/botnet/acs');
+                const data = await response.json();
+                
+                if (data.candidates) {
+                    acsCandidates = data.candidates; // Store data
+                    renderACSTable(acsCandidates);
+                } else {
+                    acsCandidates = [];
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500">No active threats detected.</td></tr>';
+                }
+                
+                // Reset bulk UI
+                document.getElementById('acs-select-all').checked = false;
+                updateBulkButton();
+                
+            } catch (error) {
+                console.error('Error loading ACS data:', error);
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-red-500">Scan failed.</td></tr>';
+            }
+        }
+
+        function renderACSTable(data) {
+            const tbody = document.getElementById('acs-table-body');
+            
+            if (data.length > 0) {
+                tbody.innerHTML = data.map(item => `
+                    <tr class="border-b border-slate-800/50 hover:bg-slate-800/30 transition group">
+                        <td class="py-1 pl-2"><input type="checkbox" value="${item.domain}" class="acs-checkbox rounded bg-slate-800 border-slate-600 text-red-600 focus:ring-0 cursor-pointer w-3 h-3" onclick="updateBulkButton()"></td>
+                        <td class="py-1 pl-2 text-white text-[10px]">${item.domain}</td>
+                        <td class="py-1 text-center">
+                            <span class="px-1.5 py-0.5 rounded text-[9px] ${getThreatColor(item.type)}">${item.type}</span>
+                        </td>
+                        <td class="py-1 text-right text-neon-blue text-[10px]">${item.count}</td>
+                        <td class="py-1 text-right pr-2">
+                            <button onclick="blockDomain('${item.domain}')" class="px-2 py-0.5 bg-red-500/20 text-red-400 text-[9px] rounded hover:bg-red-500/40 transition">BLOCK</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } else {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-500">No matches found.</td></tr>';
+            }
+        }
+
+        function filterACSList() {
+            const query = document.getElementById('acs-search').value.toLowerCase();
+            const filtered = acsCandidates.filter(item => 
+                item.domain.toLowerCase().includes(query) || 
+                item.type.toLowerCase().includes(query)
+            );
+            renderACSTable(filtered);
+            updateBulkButton();
+        }
+
+        function toggleSelectAllACS() {
+            const masterCheckbox = document.getElementById('acs-select-all');
+            const checkboxes = document.querySelectorAll('.acs-checkbox');
+            checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+            updateBulkButton();
+        }
+
+        function updateBulkButton() {
+            const selectedCount = document.querySelectorAll('.acs-checkbox:checked').length;
+            const btn = document.getElementById('btn-bulk-block');
+            if (selectedCount > 0) {
+                btn.classList.remove('hidden');
+                btn.innerText = `BLOCK (${selectedCount})`;
+            } else {
+                btn.classList.add('hidden');
+            }
+        }
+
+        async function blockSelectedACS() {
+            const checkboxes = document.querySelectorAll('.acs-checkbox:checked');
+            const domains = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (domains.length === 0) return;
+            
+            if (!confirm(`Confirm blocking ${domains.length} domains? This will restart DNS services.`)) return;
+            
+            const btn = document.getElementById('btn-bulk-block');
+            const originalText = btn.innerText;
+            btn.innerText = "PROCESSING...";
+            btn.disabled = true;
+            
+            try {
+                const response = await fetch('/api/block', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({domains: domains})
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    alert('Bulk blocking successful!');
+                    // Clear search
+                    document.getElementById('acs-search').value = '';
+                    loadACSCandidates(); 
+                    updateMetrics();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (error) {
+                console.error(error);
+                alert('Connection error or server restarting...');
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        function getThreatColor(type) {
+            if (type.includes('ACS')) return 'bg-purple-500/20 text-purple-400';
+            if (type.includes('MINER')) return 'bg-yellow-500/20 text-yellow-400';
+            if (type.includes('C2')) return 'bg-red-500/20 text-red-400';
+            if (type.includes('KEYWORD')) return 'bg-blue-500/20 text-blue-400';
+            return 'bg-slate-700 text-slate-400';
+        }
+
+        async function blockDomain(domain) {
+            if (!confirm(`Block ${domain} permanently?`)) return;
+            
+            try {
+                const response = await fetch('/api/block', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({domain: domain})
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    alert('Domain blocked successfully!');
+                    loadACSCandidates(); // Refresh list
+                    updateMetrics(); // Update main stats (replaced fetchStats)
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (error) {
+                console.error(error);
+                alert('Connection error or server restarting...');
+            }
+        }
     </script>
 </body>
 </html>

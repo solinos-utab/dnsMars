@@ -10,6 +10,9 @@ import sqlite3
 import threading
 import json
 from datetime import datetime, timedelta
+from fpdf import FPDF
+import io
+import license_manager
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24) # Random secret key for session
@@ -76,6 +79,9 @@ def sync_config():
         'whitelist_firewall': '/home/dns/whitelist.conf'
     }
     
+    # Check Trust Status
+    trust_info = get_trust_info()
+    
     for key, path in files_to_sync.items():
         if os.path.exists(path):
             try:
@@ -89,11 +95,489 @@ def sync_config():
     return jsonify({
         'status': 'success',
         'timestamp': datetime.now().isoformat(),
-        'configs': configs
+        'configs': configs,
+        'trust_config': {
+            'enabled': trust_info['enabled']
+        }
     })
 
 def is_authenticated():
     return session.get('authenticated', False)
+
+def get_threat_keywords():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT keyword FROM threat_keywords")
+        rows = c.fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except:
+        return []
+
+def analyze_threat_candidates():
+    # Load Blacklist to filter results
+    blacklist = set()
+    try:
+        if os.path.exists('/etc/dnsmasq.d/blacklist.conf'):
+            with open('/etc/dnsmasq.d/blacklist.conf', 'r') as f:
+                for line in f:
+                    # Format: address=/domain/ip
+                    match = re.search(r'address=/(.*?)/', line)
+                    if match:
+                        blacklist.add(match.group(1).lower())
+    except:
+        pass
+
+    results = []
+    try:
+        # Extended Regex for comprehensive Botnet/Threat Detection
+        base_patterns = [
+            "acs", "tr069", "cwmp", "soap", "mirai", "mozi", "botnet", 
+            "cnc\\.", "loader", "miner", "pool\\.", "crypto", "wallet", 
+            "tor\\.", "onion\\.", "trojan", "ransom", "payload", "gate\\.", "panel\\."
+        ]
+        
+        # Add custom keywords from DB
+        custom_keywords = get_threat_keywords()
+        # Escape keywords to prevent regex injection
+        escaped_keywords = [re.escape(k) for k in custom_keywords]
+        
+        # Combine all patterns
+        all_patterns = base_patterns + escaped_keywords
+        regex_pattern = "(" + "|".join(all_patterns) + ")"
+        
+        # Increased log depth to 100000 lines for better detection rate
+        # OPTIMIZATION: Use tail FIRST to avoid reading the whole file (Log Safety)
+        cmd = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -Ei 'query\\[A\\] .*{regex_pattern}' | awk '{{print $6}}' | sort | uniq -c | sort -nr | head -n 50"
+        
+        output = subprocess.check_output(cmd, shell=True).decode('utf-8')
+        
+        for line in output.split('\n'):
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                count = parts[0]
+                domain = parts[1]
+                
+                # Sanitize domain for display but keep original for matching
+                # Some domains might have weird chars that break things
+                
+                # CHECK IF BLOCKED (Smarter Check)
+                is_blacklisted = False
+                domain_lower = domain.lower()
+                
+                # 1. Exact match
+                if domain_lower in blacklist:
+                    is_blacklisted = True
+                
+                # 2. Sanitized match (matches how block_domains_internal saves it)
+                if not is_blacklisted:
+                    sanitized_domain = re.sub(r'[^a-zA-Z0-9.\-\|]', '', domain_lower)
+                    if sanitized_domain in blacklist:
+                        is_blacklisted = True
+                
+                # 3. Parent domain match (Iterative)
+                if not is_blacklisted:
+                    parts_dom = domain_lower.split('.')
+                    for i in range(len(parts_dom)-1):
+                        parent = ".".join(parts_dom[i:])
+                        if parent in blacklist:
+                            is_blacklisted = True
+                            break
+                
+                if is_blacklisted:
+                    continue
+
+                # Determine Threat Type
+                threat_type = "UNKNOWN"
+                domain_lower = domain.lower()
+                
+                # Check custom keywords first
+                keyword_match = False
+                for kw in custom_keywords:
+                    # Simple substring match might fail if domain has special chars not handled well
+                    if kw.lower() in domain_lower:
+                        threat_type = f"KEYWORD BLOCK ({kw})"
+                        keyword_match = True
+                        break
+                
+                if not keyword_match:
+                    if any(x in domain_lower for x in ['acs', 'tr069', 'cwmp', 'soap', 'telekom']):
+                        threat_type = "ACS/TR-069 (Botnet)"
+                    elif any(x in domain_lower for x in ['pool', 'mine', 'crypto', 'wallet', 'xmr', 'eth']):
+                        threat_type = "CRYPTO MINER"
+                    elif any(x in domain_lower for x in ['cnc', 'control', 'bot', 'mirai', 'mozi', 'panel', 'gate']):
+                        threat_type = "C2 / BOTNET"
+                    else:
+                        threat_type = "SUSPICIOUS"
+
+                results.append({'domain': domain, 'count': count, 'type': threat_type})
+                
+    except Exception as e:
+        print(f"Error in threat analysis: {e}")
+        
+    return results
+
+@app.route('/api/botnet/acs')
+def get_acs_candidates():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        results = analyze_threat_candidates()
+        return jsonify({'candidates': results})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/threat/keywords', methods=['GET', 'POST', 'DELETE'])
+def threat_keywords_api():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+
+    if request.method == 'GET':
+        return jsonify({'keywords': get_threat_keywords()})
+
+    if request.method == 'POST':
+        data = request.json
+        keyword = data.get('keyword', '').strip().lower()
+        if not keyword:
+            return jsonify({'status': 'error', 'message': 'Invalid keyword'})
+        
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("INSERT OR IGNORE INTO threat_keywords (keyword) VALUES (?)", (keyword,))
+            conn.commit()
+            conn.close()
+            return jsonify({'status': 'success'})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)})
+
+    if request.method == 'DELETE':
+        data = request.json
+        keyword = data.get('keyword', '').strip().lower()
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("DELETE FROM threat_keywords WHERE keyword = ?", (keyword,))
+            conn.commit()
+            conn.close()
+            return jsonify({'status': 'success'})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)})
+
+def block_domains_internal(domains_to_block):
+    if not domains_to_block:
+        return 0, "No domains provided"
+        
+    server_ip = get_server_ip()
+    blocked_count = 0
+    
+    try:
+        # Read existing blacklist to avoid duplicates
+        existing_blacklist = set()
+        if os.path.exists('/etc/dnsmasq.d/blacklist.conf'):
+            with open('/etc/dnsmasq.d/blacklist.conf', 'r') as f:
+                existing_blacklist = set(line.strip() for line in f)
+
+        new_entries = []
+        for domain in domains_to_block:
+            domain = domain.strip()
+            if not domain: continue
+            
+            # Sanitize
+            # Allow pipe | for some botnet domains, but be careful
+            domain = re.sub(r'[^a-zA-Z0-9.\-\|]', '', domain)
+            
+            entry = f"address=/{domain}/{server_ip}"
+            
+            # Check if already exists in file content or new entries
+            is_duplicate = False
+            for existing in existing_blacklist:
+                if f"/{domain}/" in existing:
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                new_entries.append(entry)
+                blocked_count += 1
+
+        if not new_entries:
+             return 0, "All domains were already blocked"
+
+        # Append all new entries at once
+        with open('/etc/dnsmasq.d/blacklist.conf', 'a') as f:
+            f.write('\n' + '\n'.join(new_entries) + '\n')
+        
+        # Use background restart to prevent browser timeout
+        success, msg = safe_service_restart(background=True)
+        if not success:
+            return 0, msg
+            
+        return blocked_count, f"{blocked_count} domains blocked successfully"
+    except Exception as e:
+        return 0, str(e)
+
+@app.route('/api/block', methods=['POST'])
+def block_domain_endpoint():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    data = request.json
+    
+    # Handle single domain or bulk domains
+    domains_to_block = []
+    
+    if 'domains' in data and isinstance(data['domains'], list):
+        domains_to_block = data['domains']
+    elif 'domain' in data:
+        domains_to_block = [data['domain']]
+    
+    count, message = block_domains_internal(domains_to_block)
+    
+    if count > 0 or "already blocked" in message:
+        return jsonify({'status': 'success', 'message': message})
+    else:
+        return jsonify({'status': 'error', 'message': message})
+
+# --- AUTO BLOCK SYSTEM ---
+
+def get_autoblock_config():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT threat_type, enabled FROM auto_block_config")
+        rows = c.fetchall()
+        conn.close()
+        
+        config = {}
+        for r in rows:
+            config[r[0]] = bool(r[1])
+        return config
+    except Exception as e:
+        print(f"Error reading autoblock config: {e}")
+        return {}
+
+def auto_block_worker():
+    # Wait for system to stabilize
+    time.sleep(30)
+    
+    while True:
+        try:
+            config = get_autoblock_config()
+            keywords = get_threat_keywords()
+            
+            # If no config is enabled AND no keywords defined, skip analysis
+            if not any(config.values()) and not keywords:
+                time.sleep(600) # Sleep 10 mins
+                continue
+                
+            # print("AutoBlock: Running analysis...")
+            candidates = analyze_threat_candidates()
+            
+            domains_to_block = []
+            for item in candidates:
+                threat_type = item['type']
+                domain = item['domain']
+                
+                # Check if this threat type is enabled for auto-blocking
+                # OR if it matches a custom keyword (always auto-block keywords)
+                if config.get(threat_type, False) or threat_type.startswith("KEYWORD BLOCK"):
+                    domains_to_block.append(domain)
+            
+            if domains_to_block:
+                print(f"AutoBlock: Found {len(domains_to_block)} domains to block. Types: {config}")
+                count, msg = block_domains_internal(domains_to_block)
+                print(f"AutoBlock: {msg}")
+            
+        except Exception as e:
+            print(f"AutoBlock Error: {e}")
+            
+        time.sleep(600) # Run every 10 minutes
+
+def schedule_worker():
+    # Wait for system to stabilize
+    time.sleep(45)
+    
+    last_status = None
+    
+    while True:
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("SELECT enabled, start_time, end_time FROM trust_schedule WHERE id=1")
+            row = c.fetchone()
+            conn.close()
+            
+            if row:
+                enabled = bool(row[0])
+                start_time_str = row[1]
+                end_time_str = row[2]
+                
+                # If schedule is disabled in DB, do nothing (Manual mode overrides or stays as is)
+                # Wait, if schedule is enabled, we enforce time.
+                # If schedule is disabled, we assume manual control and do NOT touch it.
+                # BUT, the user toggles "enabled" in the UI to turn ON the feature.
+                # The "schedule" feature implies "Time Based Activation".
+                
+                # Logic Refinement:
+                # The 'trust_schedule' table 'enabled' flag means "Is Schedule Mode Active?".
+                # If Enabled: We check time. If inside window -> Trust ON. If outside -> Trust OFF.
+                # If Disabled: We DO NOT touch Trust state (Manual Mode).
+                
+                # HOWEVER, the UI 'toggle_trust' endpoint updates this 'enabled' flag!
+                # See toggle_trust: c.execute("UPDATE trust_schedule SET enabled=? WHERE id=1", (db_enabled,))
+                
+                # This implies 'enabled' = "Trust is ON".
+                # But then 'start_time' and 'end_time' are just attributes?
+                # If start_time == end_time (e.g. 00:00), maybe it means "Always On"?
+                
+                # User Requirement: "dns trust baik mode scedule dan manual tidak berjalan"
+                # This suggests there are TWO modes.
+                # Let's check how the UI likely works (inference).
+                # Usually: 
+                # Mode 1: Manual ON/OFF.
+                # Mode 2: Scheduled (ON during X to Y).
+                
+                # Current DB Schema: id, enabled, start_time, end_time.
+                # If I treat 'enabled' as "Global Master Switch", then:
+                # If enabled=1: Check Time. 
+                #    If Time 00:00-00:00 -> Always ON.
+                #    If Time Set -> ON only during window.
+                # If enabled=0: Always OFF.
+                
+                # BUT, 'toggle_trust' sets enabled=1 when user clicks "Enable".
+                # So if user clicks Enable, enabled=1.
+                # If they set a schedule, say 08:00 - 17:00.
+                # Then at 18:00, it should be OFF.
+                # At 18:00, enabled=1 (in DB), but outside window.
+                # So the worker should turn it OFF.
+                
+                # What happens if user manually clicks "Disable"?
+                # toggle_trust sets enabled=0. Worker sees enabled=0, ensures it's OFF.
+                
+                # What if user manually clicks "Enable" at 18:00 (outside schedule)?
+                # toggle_trust sets enabled=1.
+                # Worker sees enabled=1. Checks time (18:00). Outside window (08-17).
+                # Worker turns it OFF immediately!
+                # This prevents Manual Override outside schedule if Schedule is "Always Active".
+                
+                # To support both Manual and Schedule, we usually need a "mode" flag.
+                # Since we lack a "mode" column, let's assume:
+                # If start_time == end_time (00:00 - 00:00), it's MANUAL MODE (Always ON if enabled=1).
+                # If start_time != end_time, it's SCHEDULE MODE.
+                
+                if enabled:
+                    should_be_active = False
+                    
+                    if start_time_str == end_time_str:
+                        # Manual Mode (Always On)
+                        should_be_active = True
+                    else:
+                        # Schedule Mode
+                        now = datetime.now()
+                        current_time = now.strftime('%H:%M')
+                        
+                        # Handle cross-midnight (e.g. 22:00 to 06:00)
+                        if start_time_str > end_time_str:
+                            if current_time >= start_time_str or current_time < end_time_str:
+                                should_be_active = True
+                        else:
+                            if start_time_str <= current_time < end_time_str:
+                                should_be_active = True
+                    
+                    # Apply State
+                    trust_info = get_trust_info()
+                    is_currently_active = trust_info['enabled']
+                    
+                    if should_be_active and not is_currently_active:
+                        print(f"Schedule: Activating Trust (Time: {start_time_str}-{end_time_str})")
+                        # Call toggle logic internally
+                        # We can reuse the API logic or call a function.
+                        # Reusing API logic via requests is risky (auth).
+                        # Better extract toggle logic to a function.
+                        perform_trust_toggle(True)
+                        
+                    elif not should_be_active and is_currently_active:
+                        print(f"Schedule: Deactivating Trust (Time: {start_time_str}-{end_time_str})")
+                        perform_trust_toggle(False)
+                        
+        except Exception as e:
+            print(f"Schedule Worker Error: {e}")
+            
+        time.sleep(60) # Check every minute
+
+# Start Schedule Thread
+schedule_thread = threading.Thread(target=schedule_worker, daemon=True)
+schedule_thread.start()
+
+# Start Auto-Block Thread
+autoblock_thread = threading.Thread(target=auto_block_worker, daemon=True)
+autoblock_thread.start()
+
+def perform_trust_toggle(enable):
+    blocklist_file = '/etc/dnsmasq.d/internet_positif.conf'
+    blocklist_disabled = '/home/dns/blocklists/disabled/internet_positif.conf'
+    
+    # Ensure disabled directory exists
+    if not os.path.exists('/home/dns/blocklists/disabled'):
+        run_command('sudo mkdir -p /home/dns/blocklists/disabled')
+        run_command('sudo chown dns:dns /home/dns/blocklists/disabled')
+
+    if enable:
+        # Enable Blocklist
+        if os.path.exists(blocklist_disabled):
+            run_command(f"sudo mv {blocklist_disabled} {blocklist_file}")
+        elif not os.path.exists(blocklist_file):
+            print("Blocklist file missing")
+            return False
+        
+        # Verify file moved
+        if not os.path.exists(blocklist_file):
+             run_command(f"sudo cp {blocklist_disabled} {blocklist_file}")
+
+        # Apply firewall rules
+        run_command("sudo bash /home/dns/setup_firewall.sh")
+        safe_service_restart()
+        return True
+    else:
+        # Disable Blocklist
+        if os.path.exists(blocklist_file):
+            if not os.path.exists('/home/dns/blocklists/disabled'):
+                run_command('sudo mkdir -p /home/dns/blocklists/disabled')
+            run_command(f"sudo mv {blocklist_file} {blocklist_disabled}")
+        
+        # Ensure no stray .disabled files
+        run_command("sudo rm -f /etc/dnsmasq.d/*.disabled")
+
+        # Apply firewall rules
+        run_command("sudo bash /home/dns/setup_firewall.sh")
+        safe_service_restart()
+        return True
+
+@app.route('/api/autoblock/config', methods=['GET', 'POST'])
+def autoblock_config_endpoint():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        
+    if request.method == 'GET':
+        return jsonify(get_autoblock_config())
+        
+    if request.method == 'POST':
+        try:
+            data = request.json
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            for threat_type, enabled in data.items():
+                c.execute("INSERT OR REPLACE INTO auto_block_config (threat_type, enabled) VALUES (?, ?)", 
+                          (threat_type, 1 if enabled else 0))
+            
+            conn.commit()
+            conn.close()
+            return jsonify({'status': 'success', 'config': get_autoblock_config()})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -108,6 +592,45 @@ def login():
         session['authenticated'] = True
         return jsonify({'status': 'success'})
     return jsonify({'status': 'error', 'message': 'Invalid password'}), 401
+
+# --- LICENSE GENERATOR API ---
+@app.route('/api/license/list', methods=['GET'])
+def list_licenses_route():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    licenses = license_manager.list_licenses()
+    return jsonify({'status': 'success', 'licenses': licenses})
+
+@app.route('/api/license/generate', methods=['POST'])
+def generate_license_route():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    data = request.json
+    client_name = data.get('client_name', 'Unknown')
+    plan = data.get('plan', 'PRO')
+    duration = data.get('duration', 365)
+    
+    result = license_manager.generate_license(client_name, plan, duration)
+    return jsonify({'status': 'success', 'license': result})
+
+@app.route('/api/license/features', methods=['GET'])
+def license_features():
+    plan = request.args.get('plan', 'PRO')
+    features = license_manager.get_plan_features(plan)
+    return jsonify({'status': 'success', 'plan': plan, 'features': features})
+
+@app.route('/api/license/revoke', methods=['POST'])
+def revoke_license_route():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    data = request.json
+    key = data.get('key')
+    
+    if license_manager.revoke_license(key):
+        return jsonify({'status': 'success', 'message': 'License revoked'})
+    return jsonify({'status': 'error', 'message': 'License not found'}), 404
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
@@ -332,6 +855,15 @@ def get_servfail_stats(limit=5):
     Returns: [{'domain': domain, 'errors': count, 'percentage': pct}, ...]
     """
     try:
+        # Load Blacklist to filter results (Deduplication)
+        blacklist = set()
+        if os.path.exists('/etc/dnsmasq.d/blacklist.conf'):
+            with open('/etc/dnsmasq.d/blacklist.conf', 'r') as f:
+                for line in f:
+                    match = re.search(r'address=/(.*?)/', line)
+                    if match:
+                        blacklist.add(match.group(1).lower())
+
         # Get total queries in recent logs
         cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
         total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
@@ -351,6 +883,33 @@ def get_servfail_stats(limit=5):
                 if len(parts) >= 2:
                     count = int(parts[0])
                     domain = parts[1]
+                    
+                    # FILTER: Skip if already blocked (Smarter Check)
+                    is_blacklisted = False
+                    domain_lower = domain.lower()
+                    
+                    # 1. Exact match
+                    if domain_lower in blacklist:
+                        is_blacklisted = True
+                    
+                    # 2. Sanitized match
+                    if not is_blacklisted:
+                        sanitized_domain = re.sub(r'[^a-zA-Z0-9.\-\|]', '', domain_lower)
+                        if sanitized_domain in blacklist:
+                            is_blacklisted = True
+                            
+                    # 3. Parent domain match
+                    if not is_blacklisted:
+                        parts_dom = domain_lower.split('.')
+                        for i in range(len(parts_dom)-1):
+                            parent = ".".join(parts_dom[i:])
+                            if parent in blacklist:
+                                is_blacklisted = True
+                                break
+                    
+                    if is_blacklisted:
+                        continue
+                        
                     percentage = round((count / total_queries) * 100, 2) if total_queries > 0 else 0
                     
                     servfail_data.append({
@@ -373,6 +932,15 @@ def get_blocklist_stats(limit=10):
     Returns: [{'domain': domain, 'blocked': count, 'percentage': pct}, ...]
     """
     try:
+        # Load Blacklist to filter results (Deduplication)
+        blacklist = set()
+        if os.path.exists('/etc/dnsmasq.d/blacklist.conf'):
+            with open('/etc/dnsmasq.d/blacklist.conf', 'r') as f:
+                for line in f:
+                    match = re.search(r'address=/(.*?)/', line)
+                    if match:
+                        blacklist.add(match.group(1).lower())
+                        
         # Get total queries
         cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
         total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
@@ -565,6 +1133,10 @@ def init_db():
                      (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS trust_schedule
                      (id INTEGER PRIMARY KEY, enabled INTEGER, start_time TEXT, end_time TEXT, trust_ips TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS auto_block_config
+                     (threat_type TEXT PRIMARY KEY, enabled INTEGER)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS threat_keywords
+                     (keyword TEXT PRIMARY KEY)''')
         
         # Default schedule (disabled, 00:00 to 00:00, default IPs)
         c.execute("INSERT OR IGNORE INTO trust_schedule (id, enabled, start_time, end_time, trust_ips) VALUES (1, 0, '00:00', '00:00', '8.8.8.8, 1.1.1.1')")
@@ -733,6 +1305,139 @@ def traffic_blocklist():
         'top_domains': blocklist_data
     })
 
+def get_threat_stats(limit=10):
+    """
+    Get cyber threat hits from dnsmasq logs
+    Returns: [{'domain': domain, 'threat': count, 'type': type, 'percentage': pct}, ...]
+    """
+    try:
+        # Load Blacklist to filter results (Deduplication)
+        blacklist = set()
+        if os.path.exists('/etc/dnsmasq.d/blacklist.conf'):
+            with open('/etc/dnsmasq.d/blacklist.conf', 'r') as f:
+                for line in f:
+                    match = re.search(r'address=/(.*?)/', line)
+                    if match:
+                        blacklist.add(match.group(1).lower())
+
+        # Get total queries
+        cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
+        total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        total_queries = int(total_result) if total_result else 1
+        
+        # Define threat patterns (reused from analyze_threat_candidates)
+        base_patterns = [
+            "acs", "tr069", "cwmp", "soap", "mirai", "mozi", "botnet", 
+            "cnc\\.", "loader", "miner", "pool\\.", "crypto", "wallet", 
+            "tor\\.", "onion\\.", "trojan", "ransom", "payload", "gate\\.", "panel\\."
+        ]
+        
+        # Add custom keywords
+        custom_keywords = get_threat_keywords()
+        escaped_keywords = [re.escape(k) for k in custom_keywords]
+        
+        all_patterns = base_patterns + escaped_keywords
+        regex_pattern = "(" + "|".join(all_patterns) + ")"
+        
+        # Grep for threats (tail first optimization)
+        cmd = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -Ei 'query\\[A\\] .*{regex_pattern}' | awk '{{print $6}}' | sort | uniq -c | sort -nr | head -n {limit}"
+        
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        
+        if not result:
+            return []
+            
+        threat_data = []
+        for line in result.split('\n'):
+            try:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    count = int(parts[0])
+                    domain = parts[1]
+                    
+                    # FILTER: Skip if already blocked (Smarter Check)
+                    is_blacklisted = False
+                    domain_lower = domain.lower()
+                    
+                    # 1. Exact match
+                    if domain_lower in blacklist:
+                        is_blacklisted = True
+                    
+                    # 2. Sanitized match
+                    if not is_blacklisted:
+                        sanitized_domain = re.sub(r'[^a-zA-Z0-9.\-\|]', '', domain_lower)
+                        if sanitized_domain in blacklist:
+                            is_blacklisted = True
+                            
+                    # 3. Parent domain match
+                    if not is_blacklisted:
+                        parts_dom = domain_lower.split('.')
+                        for i in range(len(parts_dom)-1):
+                            parent = ".".join(parts_dom[i:])
+                            if parent in blacklist:
+                                is_blacklisted = True
+                                break
+                    
+                    if is_blacklisted:
+                        continue
+                        
+                    percentage = round((count / total_queries) * 100, 2) if total_queries > 0 else 0
+                    
+                    # Determine type
+                    threat_type = "SUSPICIOUS"
+                    # domain_lower is already defined above
+                    
+                    # Check custom keywords first
+                    keyword_match = False
+                    for kw in custom_keywords:
+                        if kw.lower() in domain_lower:
+                            threat_type = f"KEYWORD ({kw})"
+                            keyword_match = True
+                            break
+                    
+                    if not keyword_match:
+                        if any(x in domain_lower for x in ['acs', 'tr069', 'cwmp', 'soap']):
+                            threat_type = "ACS/TR-069"
+                        elif any(x in domain_lower for x in ['pool', 'mine', 'crypto', 'wallet']):
+                            threat_type = "CRYPTO MINER"
+                        elif any(x in domain_lower for x in ['cnc', 'control', 'bot', 'mirai']):
+                            threat_type = "C2 / BOTNET"
+                        
+                    threat_data.append({
+                        'domain': domain,
+                        'threat': count,
+                        'type': threat_type,
+                        'percentage': percentage
+                    })
+            except:
+                continue
+                
+        return threat_data
+    except Exception as e:
+        print(f"Error in get_threat_stats: {e}")
+        return []
+
+@app.route('/api/traffic/threats')
+def traffic_threats():
+    """Get cyber threat statistics"""
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    limit = request.args.get('limit', 10, type=int)
+    threat_data = get_threat_stats(limit=limit)
+    
+    total_threats = sum(item['threat'] for item in threat_data)
+    
+    return jsonify({
+        'timestamp': datetime.now().isoformat(),
+        'summary': {
+            'total_threats': total_threats,
+            'threat_domains': len(threat_data),
+            'threat_rate': f"{sum(item['percentage'] for item in threat_data):.2f}%"
+        },
+        'top_domains': threat_data
+    })
+
 def get_service_status(service_name):
     try:
         result = subprocess.run(['systemctl', 'is-active', service_name], capture_output=True, text=True)
@@ -743,10 +1448,11 @@ def get_service_status(service_name):
 def run_command(command, timeout=30):
     return subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
 
-def safe_service_restart():
+def safe_service_restart(background=False):
     """
     ISP-Scale Safety: Test configurations before restarting services.
     If a config is invalid, do NOT restart and return the error.
+    Optionally restart in background to avoid HTTP timeouts.
     """
     # 1. Test Dnsmasq
     test_dnsmasq = run_command("sudo dnsmasq --test")
@@ -759,9 +1465,18 @@ def safe_service_restart():
         return False, f"Unbound config error: {test_unbound.stderr.strip()}"
     
     # 3. Restart if all good
-    run_command("sudo systemctl restart dnsmasq")
-    run_command("sudo systemctl restart unbound")
-    return True, "Services restarted successfully"
+    if background:
+        def restart_task():
+            # Add small delay to allow response to be sent
+            time.sleep(0.5)
+            run_command("sudo systemctl restart dnsmasq")
+            run_command("sudo systemctl restart unbound")
+        threading.Thread(target=restart_task).start()
+        return True, "Services restarting in background"
+    else:
+        run_command("sudo systemctl restart dnsmasq")
+        run_command("sudo systemctl restart unbound")
+        return True, "Services restarted successfully"
 
 @app.route('/health')
 def health():
@@ -918,20 +1633,11 @@ def get_network_info():
 
 def get_trust_info():
     try:
-        # ISP Scale: Read from /etc/dnsmasq.d/upstream.conf
-        path = '/etc/dnsmasq.d/upstream.conf'
+        # Check if Internet Positif (Local Blocklist) is active
+        # We check if the config file exists and is NOT disabled
+        path = '/etc/dnsmasq.d/internet_positif.conf'
         if os.path.exists(path):
-            with open(path, 'r') as f:
-                content = f.read()
-                # Extract all server= lines
-                ips = re.findall(r'^server=([\d.]+)', content, re.MULTILINE)
-                
-                # Filter out default upstreams to determine if "Trust" (custom DNS) is actually active
-                defaults = ['8.8.8.8', '1.1.1.1']
-                trust_ips = [ip for ip in ips if ip not in defaults]
-                
-                if trust_ips:
-                    return {'enabled': True, 'ip': ', '.join(trust_ips)}
+            return {'enabled': True, 'ip': 'Local DB'}
         return {'enabled': False, 'ip': ''}
     except:
         return {'enabled': False, 'ip': ''}
@@ -1138,7 +1844,8 @@ def action():
     
     # Sanitize domain
     if domain:
-        domain = re.sub(r'[^a-zA-Z0-9.-]', '', domain)
+        # Allow pipe | for complex botnet domains
+        domain = re.sub(r'[^a-zA-Z0-9.\-\|]', '', domain)
     
     # Sanitize IPs
     if dns_ip:
@@ -1187,39 +1894,62 @@ def action():
         success, msg = safe_service_restart()
         if not success:
             return jsonify({'status': 'error', 'message': msg})
-    elif cmd_type == 'blacklist' and domain:
-        # Redirect to 0.0.0.0 or Server IP
+    elif cmd_type == 'blacklist':
+        domains = data.get('domains', [])
+        if domain:
+            domains.append(domain)
+            
+        if not domains:
+             return jsonify({'status': 'error', 'message': 'No domain provided'})
+
         action_val = data.get('action', 'add')
+        
         if action_val == 'add':
-            server_ip = get_server_ip()
-            run_command(f"echo 'address=/{domain}/{server_ip}' | sudo tee -a /etc/dnsmasq.d/blacklist.conf")
+            count, msg = block_domains_internal(domains)
+            if count == 0 and "already" not in msg:
+                return jsonify({'status': 'error', 'message': msg})
         elif action_val == 'remove':
-            # Use a more flexible regex to remove the domain regardless of the IP it points to
-            run_command(f"sudo sed -i '/address=\/{domain}\//d' /etc/dnsmasq.d/blacklist.conf")
+            # Bulk remove
+            for d in domains:
+                d = re.sub(r'[^a-zA-Z0-9.\-\|]', '', d) # Sanitize
+                if d:
+                    run_command(f"sudo sed -i '/address=\/{d}\//d' /etc/dnsmasq.d/blacklist.conf")
         
         success, msg = safe_service_restart()
         if not success:
             return jsonify({'status': 'error', 'message': msg})
-        return jsonify({'status': 'success', 'message': f'Domain {domain} {"blacklisted" if action_val=="add" else "removed from blacklist"}'})
+        return jsonify({'status': 'success', 'message': f'Processed {len(domains)} domains for blacklist'})
 
-    elif cmd_type == 'whitelist' and domain:
+    elif cmd_type == 'whitelist':
+        domains = data.get('domains', [])
+        if domain:
+            domains.append(domain)
+
+        if not domains:
+             return jsonify({'status': 'error', 'message': 'No domain provided'})
+
         action_val = data.get('action', 'add')
-        if action_val == 'add':
-            # 1. Remove from blacklist if exists
-            blacklist_path = "/etc/dnsmasq.d/blacklist.conf"
-            if os.path.exists(blacklist_path):
-                run_command(f"sudo sed -i '/address=\/{domain}\//d' {blacklist_path}")
+        
+        for d in domains:
+            d = re.sub(r'[^a-zA-Z0-9.\-\|]', '', d) # Sanitize
+            if not d: continue
             
-            # 2. Add to whitelist.conf with a stable public DNS (8.8.8.8)
-            run_command(f"echo 'server=/{domain}/8.8.8.8' | sudo tee -a /etc/dnsmasq.d/whitelist.conf")
-        elif action_val == 'remove':
-            run_command(f"sudo sed -i '/server=\/{domain}\//d' /etc/dnsmasq.d/whitelist.conf")
+            if action_val == 'add':
+                # 1. Remove from blacklist if exists
+                blacklist_path = "/etc/dnsmasq.d/blacklist.conf"
+                if os.path.exists(blacklist_path):
+                    run_command(f"sudo sed -i '/address=\/{d}\//d' {blacklist_path}")
+                
+                # 2. Add to whitelist.conf with a stable public DNS (8.8.8.8)
+                run_command(f"echo 'server=/{d}/8.8.8.8' | sudo tee -a /etc/dnsmasq.d/whitelist.conf")
+            elif action_val == 'remove':
+                run_command(f"sudo sed -i '/server=\/{d}\//d' /etc/dnsmasq.d/whitelist.conf")
             
         # 3. Restart services safely
         success, msg = safe_service_restart()
         if not success:
             return jsonify({'status': 'error', 'message': msg})
-        return jsonify({'status': 'success', 'message': f'Domain {domain} {"whitelisted" if action_val=="add" else "removed from whitelist"}'})
+        return jsonify({'status': 'success', 'message': f'Processed {len(domains)} domains for whitelist'})
     elif cmd_type == 'update_ssh':
         run_command("sudo apt-get update && sudo apt-get install --only-upgrade openssh-server -y")
     elif cmd_type == 'update_firewall':
@@ -1332,62 +2062,26 @@ def action():
             return jsonify({'status': 'error', 'message': msg})
         return jsonify({'status': 'success', 'message': 'IPv6 settings updated'})
     elif cmd_type == 'toggle_trust':
-        # ISP Scale: Only manage upstreams in a separate file
-        upstream_path = '/etc/dnsmasq.d/upstream.conf'
-        if trust_enabled and trust_ip:
-            # Support multiple IPs separated by comma or space
-            ips = re.split(r'[,\s]+', trust_ip)
-            # Add trust servers to dnsmasq upstream.conf
-            dnsmasq_servers = "\n".join([f"server={ip.strip()}" for ip in ips if ip.strip()])
-            
-            # Use a temp file for dnsmasq upstream.conf
-            with open('/home/dns/temp_upstream.conf', 'w') as f:
-                f.write(dnsmasq_servers + "\n")
-            run_command(f"sudo mv /home/dns/temp_upstream.conf {upstream_path}")
-            
-            # Also update Unbound to use trust servers
-            forward_lines = "\n".join([f"    forward-addr: {ip.strip()}" for ip in ips if ip.strip()])
-            forward_conf = f'forward-zone:\n    name: "."\n{forward_lines}\n'
-            
-            # Use a temp file to avoid echo escaping issues
-            with open('/home/dns/temp_forward.conf', 'w') as f:
-                f.write(forward_conf)
-            run_command("sudo mv /home/dns/temp_forward.conf /etc/unbound/unbound.conf.d/forward.conf")
-            
-            # Re-enable aliases if they were disabled
-            run_command("sudo sed -i 's/^#alias=/alias=/' /etc/dnsmasq.d/alias.conf")
-            # KEEP filter-AAAA commented to support IPv6
-            # run_command("sudo sed -i 's/^#filter-AAAA/filter-AAAA/' /etc/dnsmasq.d/alias.conf")
-            
-            # Apply firewall rules immediately
-            run_command("sudo bash /home/dns/setup_firewall.sh")
-            success, msg = safe_service_restart()
-            if not success:
-                return jsonify({'status': 'error', 'message': msg})
-            return jsonify({'status': 'success', 'message': 'DNS Trust enabled and services restarted safely'})
+        # ISP Scale: Toggle local content filtering (Internet Positif)
+        trust_enabled = data.get('trust_enabled', False)
+        
+        # SYNC WITH SCHEDULE DB
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            db_enabled = 1 if trust_enabled else 0
+            c.execute("UPDATE trust_schedule SET enabled=? WHERE id=1", (db_enabled,))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Error syncing schedule DB: {e}")
+
+        # Use shared function
+        if perform_trust_toggle(trust_enabled):
+            status_msg = "ENABLED" if trust_enabled else "DISABLED"
+            return jsonify({'status': 'success', 'message': f'Internet Positif (Local Filtering) {status_msg}'})
         else:
-            # Revert to default upstreams (Google/Cloudflare) in upstream.conf
-            default_servers = "server=8.8.8.8\nserver=1.1.1.1\n"
-            with open('/home/dns/temp_upstream.conf', 'w') as f:
-                f.write(default_servers)
-            run_command(f"sudo mv /home/dns/temp_upstream.conf {upstream_path}")
-            
-            # Revert Unbound to default
-            forward_conf = 'forward-zone:\n    name: "."\n    forward-addr: 8.8.8.8\n    forward-addr: 1.1.1.1\n'
-            with open('/home/dns/temp_forward.conf', 'w') as f:
-                f.write(forward_conf)
-            run_command("sudo mv /home/dns/temp_forward.conf /etc/unbound/unbound.conf.d/forward.conf")
-            
-            # Disable aliases to ensure no redirection to block pages (Internet Positif inactive)
-            run_command("sudo sed -i 's/^alias=/#alias=/' /etc/dnsmasq.d/alias.conf")
-            run_command("sudo sed -i 's/^filter-AAAA/#filter-AAAA/' /etc/dnsmasq.d/alias.conf")
-            
-            # Apply firewall rules immediately
-            run_command("sudo bash /home/dns/setup_firewall.sh")
-            success, msg = safe_service_restart()
-            if not success:
-                return jsonify({'status': 'error', 'message': msg})
-            return jsonify({'status': 'success', 'message': 'DNS Trust disabled and services reverted safely'})
+            return jsonify({'status': 'error', 'message': 'Failed to toggle trust settings'})
         
     return jsonify({'status': 'success'})
 
@@ -1549,6 +2243,72 @@ def update_dnsmasq_config(new_settings):
     
     # Reload dnsmasq
     subprocess.run("sudo systemctl restart dnsmasq", shell=True)
+
+@app.route('/api/export/threats/pdf')
+def export_threats_pdf():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    try:
+        # Get Threat Data
+        limit = request.args.get('limit', 100, type=int)
+        threat_data = get_threat_stats(limit=limit)
+        
+        # Initialize PDF
+        pdf = FPDF()
+        pdf.add_page()
+        
+        # Header
+        pdf.set_font("Arial", "B", 16)
+        pdf.cell(0, 10, "CYBER THREAT DETECTION REPORT", 0, 1, "C")
+        pdf.set_font("Arial", "I", 10)
+        pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Server: {get_server_ip()}", 0, 1, "C")
+        pdf.ln(5)
+        
+        # Summary
+        total_threats = sum(item['threat'] for item in threat_data)
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 10, "SUMMARY", 0, 1)
+        pdf.set_font("Arial", "", 10)
+        pdf.cell(0, 6, f"Total Detected Threats: {total_threats}", 0, 1)
+        pdf.cell(0, 6, f"Unique Domains: {len(threat_data)}", 0, 1)
+        pdf.ln(5)
+        
+        # Table Header
+        pdf.set_fill_color(200, 220, 255)
+        pdf.set_font("Arial", "B", 10)
+        pdf.cell(100, 8, "DOMAIN / HOST", 1, 0, "L", True)
+        pdf.cell(50, 8, "THREAT TYPE", 1, 0, "C", True)
+        pdf.cell(30, 8, "HITS", 1, 1, "R", True)
+        
+        # Table Content
+        pdf.set_font("Arial", "", 9)
+        for item in threat_data:
+            # Handle long domains
+            domain = item['domain']
+            if len(domain) > 50:
+                domain = domain[:47] + "..."
+                
+            pdf.cell(100, 7, domain, 1, 0, "L")
+            pdf.cell(50, 7, item['type'], 1, 0, "C")
+            pdf.cell(30, 7, str(item['threat']), 1, 1, "R")
+            
+        # Footer Note
+        pdf.ln(10)
+        pdf.set_font("Arial", "I", 8)
+        pdf.multi_cell(0, 5, "This report is generated automatically by DNS ENGINE CYBER SECURITY. The domains listed above have been detected and blocked due to suspicious activity (Botnet/Malware/Crypto Mining patterns).")
+        
+        # Output
+        pdf_content = pdf.output(dest='S').encode('latin1')
+        return send_file(
+            io.BytesIO(pdf_content),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f"Threat_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        )
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/guardian/config', methods=['GET'])
 def get_guardian_config():

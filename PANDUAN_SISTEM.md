@@ -81,7 +81,40 @@ Fitur intelijen keamanan baru untuk mendeteksi dan memblokir ancaman jaringan ti
 
 ---
 
-### 6. ANALISIS TRAFIK & MONITORING
+### 7. LICENSE GENERATOR & PLAN MANAGEMENT (BARU)
+Sistem ini kini berfungsi sebagai **License Generator Center**. Web GUI memungkinkan Anda untuk membuat dan mengelola lisensi untuk klien Anda secara mandiri.
+
+#### Fitur Utama:
+- **Create License:** Membuat lisensi baru dengan parameter:
+  - **Client Name:** Nama identitas klien.
+  - **Plan Type:** BASIC, PRO, atau ENTERPRISE.
+  - **Duration:** 1 Bulan, 1 Tahun, 2 Tahun, atau Lifetime.
+- **Manage Licenses:** Melihat daftar lisensi aktif, tanggal kadaluarsa, dan opsi untuk mencabut (revoke) lisensi.
+- **Local Database:** Semua data lisensi disimpan aman secara lokal di server ini (`licenses_db.json`).
+
+#### Detail Paket (Plan Matrix):
+1. **BASIC (Standard)**
+   - Core DNS Filtering (Ads & Malware)
+   - Standard DNS Caching
+   - Basic Web GUI Access
+   - Local Logs Only
+
+2. **PRO (Full Features)**
+   - **Advanced Threat Detection** (Botnet/Crypto)
+   - Full Traffic Analysis & Charts
+   - API Access
+   - Priority Support
+   - Unlimited Custom Whitelists
+
+3. **ENTERPRISE (Multi-node)**
+   - **High Availability Clustering** (Primary-Secondary Sync)
+   - Unlimited RPS Optimization (ISP Scale)
+   - Custom Branding / White-label
+   - Multi-Node Central Management
+
+---
+
+### 8. BATASAN PERFORMA (ISP SCALE LIMITS)
 Dashboard Web GUI menyediakan pemantauan real-time yang telah ditingkatkan:
 
 - **Traffic Analysis (Live QPS):**

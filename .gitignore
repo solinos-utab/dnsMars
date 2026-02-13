@@ -20,6 +20,11 @@ web_gui/.password.hash
 *.db
 *.sqlite
 
+# Security & License
+web_gui/private_key.pem
+web_gui/licenses_db.json
+web_gui/license.key
+
 # Temp files
 __pycache__/
 *.pyc

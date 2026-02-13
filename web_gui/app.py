@@ -593,18 +593,56 @@ def login():
         return jsonify({'status': 'success'})
     return jsonify({'status': 'error', 'message': 'Invalid password'}), 401
 
-# --- LICENSE GENERATOR API ---
+@app.route('/api/system/role', methods=['GET'])
+def get_system_role_info():
+    """Determine if this node is a License Generator (Master) or Client"""
+    # Check if Private Key exists -> Master
+    is_master = os.path.exists("/home/dns/web_gui/private_key.pem")
+    return jsonify({'status': 'success', 'is_master': is_master})
+
+# --- LICENSE API (HYBRID: GENERATOR & CLIENT) ---
+
+# Client: Check Status
+@app.route('/api/license/status', methods=['GET'])
+def license_status_client():
+    status = license_manager.get_current_license_status()
+    return jsonify(status)
+
+# Client: Activate
+@app.route('/api/license/activate', methods=['POST'])
+def activate_license_client():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        
+    data = request.json
+    key = data.get('key', '').strip()
+    
+    success, msg, info = license_manager.activate_client_license(key)
+    if success:
+        return jsonify({'status': 'success', 'message': msg, 'plan': info['plan']})
+    return jsonify({'status': 'error', 'message': msg})
+
+# Generator: List (Only if Master)
 @app.route('/api/license/list', methods=['GET'])
 def list_licenses_route():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    # Optional: Enforce Master Check
+    if not os.path.exists("/home/dns/web_gui/private_key.pem"):
+         return jsonify({'status': 'error', 'message': 'Access Denied: Not a License Generator Node'}), 403
+         
     licenses = license_manager.list_licenses()
     return jsonify({'status': 'success', 'licenses': licenses})
 
+# Generator: Generate (Only if Master)
 @app.route('/api/license/generate', methods=['POST'])
 def generate_license_route():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    if not os.path.exists("/home/dns/web_gui/private_key.pem"):
+         return jsonify({'status': 'error', 'message': 'Access Denied: Not a License Generator Node'}), 403
     
     data = request.json
     client_name = data.get('client_name', 'Unknown')
@@ -612,6 +650,9 @@ def generate_license_route():
     duration = data.get('duration', 365)
     
     result = license_manager.generate_license(client_name, plan, duration)
+    if "error" in result:
+        return jsonify({'status': 'error', 'message': result['error']}), 500
+        
     return jsonify({'status': 'success', 'license': result})
 
 @app.route('/api/license/features', methods=['GET'])

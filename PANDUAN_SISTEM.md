@@ -1,5 +1,5 @@
 # BUKU PANDUAN SISTEM - PT MARS DATA TELEKOMUNIKASI
-## DUAL STACK DNS ENGINE (ISP SCALE EDITION)
+## DNS ENGINE CYBER SECURITY (ISP SCALE EDITION)
 
 Dokumentasi ini berisi panduan operasional dan teknis untuk sistem DNS Mars Data yang telah dioptimalkan untuk skala ISP dengan topologi NAT.
 

@@ -1,4 +1,4 @@
 {
     "ban_threshold": 10000,
-    "malicious_threshold": 200
+    "malicious_threshold": 500
 }

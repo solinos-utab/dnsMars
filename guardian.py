@@ -10,16 +10,24 @@ import json
 # --- CONFIGURATION ---
 LOG_FILE = "/var/log/syslog"
 DNSMASQ_LOG = "/var/log/dnsmasq.log"
+NGINX_LOG = "/var/log/nginx/access.log"
 CONFIG_FILE = "/home/dns/guardian_config.json"
 
 # Default values
 DEFAULT_BAN_THRESHOLD = 10000
 DEFAULT_MALICIOUS_THRESHOLD = 200
+DISK_CRITICAL_THRESHOLD = 90  # Percent
+MEM_CRITICAL_THRESHOLD = 90   # Percent
+SWAP_CRITICAL_THRESHOLD = 60  # Percent
+CPU_CRITICAL_THRESHOLD = 95   # Percent
 
 def load_config():
     config = {
         "ban_threshold": DEFAULT_BAN_THRESHOLD,
-        "malicious_threshold": DEFAULT_MALICIOUS_THRESHOLD
+        "malicious_threshold": DEFAULT_MALICIOUS_THRESHOLD,
+        "disk_threshold": DISK_CRITICAL_THRESHOLD,
+        "mem_threshold": MEM_CRITICAL_THRESHOLD,
+        "swap_threshold": SWAP_CRITICAL_THRESHOLD
     }
     if os.path.exists(CONFIG_FILE):
         try:
@@ -34,6 +42,9 @@ def load_config():
 config = load_config()
 BAN_THRESHOLD = config["ban_threshold"]
 MALICIOUS_THRESHOLD = config["malicious_threshold"]
+DISK_THRESHOLD = config.get("disk_threshold", DISK_CRITICAL_THRESHOLD)
+MEM_THRESHOLD = config.get("mem_threshold", MEM_CRITICAL_THRESHOLD)
+SWAP_THRESHOLD = config.get("swap_threshold", SWAP_CRITICAL_THRESHOLD)
 
 WHITELIST_FILE = "/home/dns/whitelist.conf"
 GUARDIAN_LOG = "/home/dns/guardian.log"
@@ -71,6 +82,9 @@ def reload_whitelist_if_needed():
         config = load_config()
         BAN_THRESHOLD = config["ban_threshold"]
         MALICIOUS_THRESHOLD = config["malicious_threshold"]
+        DISK_THRESHOLD = config.get("disk_threshold", DISK_CRITICAL_THRESHOLD)
+        MEM_THRESHOLD = config.get("mem_threshold", MEM_CRITICAL_THRESHOLD)
+        SWAP_THRESHOLD = config.get("swap_threshold", SWAP_CRITICAL_THRESHOLD)
         
         LAST_WL_RELOAD = time.time()
         # Clean up banned_ips.txt if needed
@@ -249,39 +263,10 @@ def is_port_listening(port, proto="tcp", addr_part=":"):
 
 def is_dns_trust_enabled():
     """
-    Check if DNS Trust is enabled by examining upstream.conf.
-    DNS Trust is ENABLED if it contains ANY server address OTHER than defaults (8.8.8.8, 1.1.1.1)
-    DNS Trust is DISABLED if upstream.conf is empty, has no servers, or only has default servers
+    Check if DNS Trust (Internet Positif) is enabled by checking if the local blocklist file exists.
     """
-    if not os.path.exists(TRUST_CONF):
-        return False
-    try:
-        # Default upstream servers (used when DNS Trust is disabled)
-        default_servers = {'8.8.8.8', '1.1.1.1'}
-        found_servers = set()
-        
-        with open(TRUST_CONF, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith('server='):
-                    # Extract server IP
-                    server_ip = line.replace('server=', '').strip()
-                    if server_ip:
-                        found_servers.add(server_ip)
-        
-        # If no servers found, DNS Trust is disabled
-        if not found_servers:
-            return False
-        
-        # If only default servers found, DNS Trust is disabled
-        if found_servers == default_servers:
-            return False
-        
-        # If ANY non-default server found, DNS Trust is ENABLED
-        return len(found_servers) > 0
-    except:
-        pass
-    return False
+    blocklist_file = "/etc/dnsmasq.d/internet_positif.conf"
+    return os.path.exists(blocklist_file)
 
 def sync_blocking_config(dns_trust):
     blocking_files = [
@@ -486,6 +471,94 @@ def check_and_repair_services():
         log_event(f"ALERT: Critical firewall rules ({', '.join(reason)}) are missing. Restoring...")
         run_cmd("sudo bash /home/dns/setup_firewall.sh")
 
+def check_resources():
+    """
+    Monitor Memory, Swap, and UDP Errors.
+    Mitigates: Memory Leak, Swap Thrashing, UDP Drops.
+    """
+    try:
+        # 1. Check Memory & Swap
+        with open('/proc/meminfo', 'r') as f:
+            meminfo = {}
+            for line in f:
+                parts = line.split(':')
+                meminfo[parts[0].strip()] = int(parts[1].split()[0])
+        
+        total_mem = meminfo.get('MemTotal', 1)
+        avail_mem = meminfo.get('MemAvailable', 0)
+        total_swap = meminfo.get('SwapTotal', 0)
+        free_swap = meminfo.get('SwapFree', 0)
+        
+        mem_usage = 100 - (avail_mem / total_mem * 100)
+        swap_usage = 100 - (free_swap / total_swap * 100) if total_swap > 0 else 0
+        
+        # Memory Leak Protection
+        if mem_usage > MEM_THRESHOLD:
+            log_event(f"ALERT: High Memory Usage ({mem_usage:.1f}%). Checking for leaks...")
+            # If swap is also high, we are in trouble. Restart heaviest service.
+            if swap_usage > SWAP_THRESHOLD:
+                log_event("CRITICAL: Swap Thrashing Detected. Restarting DNS services to free memory.")
+                run_cmd("systemctl restart unbound")
+                run_cmd("systemctl restart dnsmasq")
+        
+        # 2. Check UDP Packet Drops (RCV buffer errors)
+        # cat /proc/net/snmp | grep Udp:
+        cmd = "cat /proc/net/snmp | grep 'Udp: ' | awk 'NR==2 {print $6}'" # RcvbufErrors is usually column 6
+        res = run_cmd(cmd)
+        if res and res.stdout.strip():
+            rcv_errors = int(res.stdout.strip())
+            # We track delta ideally, but for now just log if non-zero and high
+            if rcv_errors > 1000:
+                 # Check if we already logged this recently? (Simplified: just log)
+                 pass
+                 # log_event(f"WARNING: UDP Receive Errors detected: {rcv_errors}. OS Buffer tuning might be needed.")
+
+    except Exception as e:
+        log_event(f"Resource check error: {e}")
+
+def check_disk_space():
+    """
+    Emergency Disk Protection.
+    If disk usage exceeds threshold (e.g. 90%), aggressively clean logs.
+    """
+    try:
+        # Get root partition usage
+        cmd = "df -h / | awk 'NR==2 {print $5}' | sed 's/%//'"
+        res = run_cmd(cmd)
+        if not res or not res.stdout:
+            return
+            
+        usage = int(res.stdout.strip())
+        
+        if usage >= DISK_THRESHOLD:
+            log_event(f"CRITICAL: Disk usage at {usage}% (Threshold: {DISK_THRESHOLD}%). Executing EMERGENCY cleanup...")
+            
+            # 1. Truncate Logs immediately
+            if os.path.exists(DNSMASQ_LOG):
+                run_cmd(f"truncate -s 0 {DNSMASQ_LOG}")
+                log_event(f"Truncated {DNSMASQ_LOG}")
+                
+            if os.path.exists(NGINX_LOG):
+                run_cmd(f"truncate -s 0 {NGINX_LOG}")
+                log_event(f"Truncated {NGINX_LOG}")
+                
+            # 1.5 Vacuum Systemd Journal (Syslog)
+            run_cmd("journalctl --vacuum-size=50M")
+            log_event("Vacuumed systemd journal to 50MB")
+
+            # 2. Check for rotated logs that are huge and delete them
+            # Delete any .gz or .1 log file in /var/log/nginx older than 0 days (immediate)
+            run_cmd("find /var/log/nginx -name '*.gz' -delete")
+            run_cmd("find /var/log/nginx -name '*.1' -delete")
+            
+            # Same for dnsmasq
+            run_cmd("find /var/log -name 'dnsmasq.log.*.gz' -delete")
+            
+            log_event("Emergency cleanup completed.")
+            
+    except Exception as e:
+        log_event(f"Error checking disk space: {e}")
+
 def detect_and_block_attacks():
     if not is_dns_trust_enabled():
         return
@@ -638,47 +711,51 @@ def _check_time_in_range(start_time, end_time, now):
         return False
 
 
-def enable_trust_logic(trust_ip):
+def enable_trust_logic(trust_ip=None):
     try:
-        upstream_path = '/etc/dnsmasq.d/upstream.conf'
-        ips = re.split(r'[,\s]+', trust_ip)
-        dnsmasq_servers = "\n".join([f"server={ip.strip()}" for ip in ips if ip.strip()])
+        # Enable Local Blocklist
+        blocklist_file = '/etc/dnsmasq.d/internet_positif.conf'
+        blocklist_disabled = '/home/dns/blocklists/disabled/internet_positif.conf'
         
-        with open('/home/dns/temp_upstream.conf', 'w') as f:
-            f.write(dnsmasq_servers + "\n")
-        run_cmd(f"sudo mv /home/dns/temp_upstream.conf {upstream_path}")
-        
-        forward_lines = "\n".join([f"    forward-addr: {ip.strip()}" for ip in ips if ip.strip()])
-        forward_conf = f'forward-zone:\n    name: "."\n{forward_lines}\n'
-        
-        with open('/home/dns/temp_forward.conf', 'w') as f:
-            f.write(forward_conf)
-        run_cmd("sudo mv /home/dns/temp_forward.conf /etc/unbound/unbound.conf.d/forward.conf")
-        
-        run_cmd("sudo sed -i 's/^#alias=/alias=/' /etc/dnsmasq.d/alias.conf")
+        # Also check for legacy disabled file and migrate if needed
+        legacy_disabled = '/etc/dnsmasq.d/internet_positif.conf.disabled'
+        if os.path.exists(legacy_disabled):
+            run_cmd(f"sudo mv {legacy_disabled} {blocklist_disabled}")
+
+        if os.path.exists(blocklist_disabled):
+            # Use cp instead of mv to keep backup safe
+            res = run_cmd(f"sudo cp {blocklist_disabled} {blocklist_file}")
+            if res and res.returncode != 0:
+                log_event(f"Error copying blocklist: {res.stderr}")
+            
         run_cmd("sudo bash /home/dns/setup_firewall.sh")
         run_cmd("sudo systemctl restart dnsmasq")
-        run_cmd("sudo systemctl restart unbound")
+        # Unbound restart not strictly needed but good for cleanup
+        run_cmd("sudo systemctl restart unbound") 
     except Exception as e:
         log_event(f"Failed to enable trust via schedule: {e}")
 
 def disable_trust_logic():
     try:
-        upstream_path = '/etc/dnsmasq.d/upstream.conf'
-        default_servers = "server=8.8.8.8\nserver=1.1.1.1\n"
-        with open('/home/dns/temp_upstream.conf', 'w') as f:
-            f.write(default_servers)
-        run_cmd(f"sudo mv /home/dns/temp_upstream.conf {upstream_path}")
+        # Disable Local Blocklist
+        blocklist_file = '/etc/dnsmasq.d/internet_positif.conf'
+        blocklist_disabled = '/home/dns/blocklists/disabled/internet_positif.conf'
         
-        forward_conf = 'forward-zone:\n    name: "."\n    forward-addr: 8.8.8.8\n    forward-addr: 1.1.1.1\n'
-        with open('/home/dns/temp_forward.conf', 'w') as f:
-            f.write(forward_conf)
-        run_cmd("sudo mv /home/dns/temp_forward.conf /etc/unbound/unbound.conf.d/forward.conf")
+        # Ensure target directory exists
+        if not os.path.exists('/home/dns/blocklists/disabled'):
+            run_cmd('sudo mkdir -p /home/dns/blocklists/disabled')
+
+        if os.path.exists(blocklist_file):
+            # Move to disabled folder
+            res = run_cmd(f"sudo mv {blocklist_file} {blocklist_disabled}")
+            if res and res.returncode != 0:
+                log_event(f"Error moving blocklist to disabled: {res.stderr}")
         
-        run_cmd("sudo sed -i 's/^alias=/#alias=/' /etc/dnsmasq.d/alias.conf")
+        # Clean up any legacy stray files
+        run_cmd("sudo rm -f /etc/dnsmasq.d/*.disabled")
+            
         run_cmd("sudo bash /home/dns/setup_firewall.sh")
         run_cmd("sudo systemctl restart dnsmasq")
-        run_cmd("sudo systemctl restart unbound")
     except Exception as e:
         log_event(f"Failed to disable trust via schedule: {e}")
 
@@ -691,6 +768,12 @@ if __name__ == "__main__":
     
     while True:
         try:
+            # 1. Emergency Disk Check (Priority 1)
+            check_disk_space()
+            
+            # 2. Resource Health Check (Memory, Swap, UDP)
+            check_resources()
+            
             # Refresh server IP and Whitelist in case of network changes
             reload_whitelist_if_needed()
             

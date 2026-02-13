@@ -5,6 +5,12 @@
 
 echo "Setting up Anti-DDoS and DNS Flood Protection..."
 
+# --- SYSTEM CLEANUP & FIXES ---
+# Ensure no stray disabled files in dnsmasq config to prevent "Ghost Blocking"
+echo "Cleaning up stray config files..."
+rm -f /etc/dnsmasq.d/*.disabled
+# ------------------------------
+
 # 1. Port yang diizinkan dengan ACL (SSH & Web GUI)
 # Ambil IP server secara otomatis atau dari argumen
 if [ ! -z "$1" ]; then

@@ -326,7 +326,7 @@
                 <div>
                     <h1 class="text-2xl md:text-3xl font-bold font-orbitron tracking-wider text-white">PT MARS DATA TELEKOMUNIKASI</h1>
                     <div class="flex items-center gap-4 mt-1">
-                            <p class="text-blue-400 font-medium tracking-widest text-xs">DUAL STACK DNS ENGINE ft AI <span id="header-node-role" class="ml-2 text-white bg-blue-600 px-2 py-0.5 rounded text-[8px]">PRIMARY</span></p>
+                            <p class="text-blue-400 font-medium tracking-widest text-xs">DNS ENGINE CYBER SECURITY <span id="header-node-role" class="ml-2 text-white bg-blue-600 px-2 py-0.5 rounded text-[8px]">PRIMARY</span></p>
                             <button onclick="openPasswordModal()" class="text-[9px] text-slate-500 hover:text-purple-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">CHANGE PWD</button>
                             <button onclick="logout()" class="text-[9px] text-slate-500 hover:text-red-400 font-orbitron border border-slate-800 px-2 py-0.5 rounded transition">LOGOUT</button>
                         </div>
@@ -1238,6 +1238,12 @@
         blockedGradient.addColorStop(0.5, 'rgba(245, 158, 11, 0.1)');
         blockedGradient.addColorStop(1, 'rgba(245, 158, 11, 0.01)');
 
+        // Gradient for Threats
+        const threatGradient = combinedCtx.createLinearGradient(0, 0, 0, 320);
+        threatGradient.addColorStop(0, 'rgba(168, 85, 247, 0.25)'); // Purple
+        threatGradient.addColorStop(0.5, 'rgba(168, 85, 247, 0.1)');
+        threatGradient.addColorStop(1, 'rgba(168, 85, 247, 0.01)');
+
         const combinedTrafficChart = new Chart(combinedCtx, {
             type: 'line',
             data: { 
@@ -1261,6 +1267,19 @@
                         data: [], 
                         borderColor: '#f59e0b',
                         backgroundColor: blockedGradient,
+                        borderWidth: 2,
+                        tension: 0.5,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointBorderWidth: 0,
+                        pointHitRadius: 10
+                    },
+                    { 
+                        label: 'Cyber Threats', 
+                        data: [], 
+                        borderColor: '#a855f7', // Purple-500
+                        backgroundColor: threatGradient,
                         borderWidth: 2,
                         tension: 0.5,
                         fill: true,
@@ -1692,35 +1711,49 @@ sudo systemctl restart dnsmasq
 
         async function updateCombinedTraffic() {
             try {
-                const [resServfail, resBlocklist] = await Promise.all([
+                const [resServfail, resBlocklist, resThreats] = await Promise.all([
                     fetch('/api/traffic/servfail'),
-                    fetch('/api/traffic/blocklist')
+                    fetch('/api/traffic/blocklist'),
+                    fetch('/api/traffic/threats')
                 ]);
 
                 if (resServfail.status === 401 || resBlocklist.status === 401) return;
 
                 const servfailData = await resServfail.json();
                 const blocklistData = await resBlocklist.json();
+                
+                let threatData = { top_domains: [], summary: { total_threats: 0 } };
+                if (resThreats.ok) {
+                    threatData = await resThreats.json();
+                }
 
                 // Process data to merge domains
                 const servfailDomains = servfailData.top_domains || [];
                 const blocklistDomains = blocklistData.top_domains || [];
+                const threatDomains = threatData.top_domains || [];
                 
                 // Create a map of all unique domains
                 const domainMap = new Map();
                 
                 servfailDomains.forEach(d => {
                     if (!domainMap.has(d.domain)) {
-                        domainMap.set(d.domain, { servfail: 0, blocked: 0 });
+                        domainMap.set(d.domain, { servfail: 0, blocked: 0, threat: 0 });
                     }
                     domainMap.get(d.domain).servfail = d.errors;
                 });
                 
                 blocklistDomains.forEach(d => {
                     if (!domainMap.has(d.domain)) {
-                        domainMap.set(d.domain, { servfail: 0, blocked: 0 });
+                        domainMap.set(d.domain, { servfail: 0, blocked: 0, threat: 0 });
                     }
                     domainMap.get(d.domain).blocked = d.blocked;
+                });
+
+                threatDomains.forEach(d => {
+                    if (!domainMap.has(d.domain)) {
+                        domainMap.set(d.domain, { servfail: 0, blocked: 0, threat: 0 });
+                    }
+                    domainMap.get(d.domain).threat = d.threat;
                 });
                 
                 // Convert map to array and sort by total activity
@@ -1728,22 +1761,27 @@ sudo systemctl restart dnsmasq
                     domain,
                     servfail: counts.servfail,
                     blocked: counts.blocked,
-                    total: counts.servfail + counts.blocked
+                    threat: counts.threat,
+                    total: counts.servfail + counts.blocked + counts.threat
                 })).sort((a, b) => b.total - a.total).slice(0, 10); // Top 10 combined
 
                 const labels = mergedData.map(d => d.domain);
                 const servfailCounts = mergedData.map(d => d.servfail);
                 const blockedCounts = mergedData.map(d => d.blocked);
+                const threatCounts = mergedData.map(d => d.threat);
 
                 combinedTrafficChart.data.labels = labels;
                 combinedTrafficChart.data.datasets[0].data = servfailCounts;
                 combinedTrafficChart.data.datasets[1].data = blockedCounts;
+                combinedTrafficChart.data.datasets[2].data = threatCounts;
                 combinedTrafficChart.update('active');
                 
                 const totalServfail = servfailData.summary.total_servfail_errors;
                 const totalBlocked = blocklistData.summary.total_blocked;
+                const totalThreats = threatData.summary.total_threats;
+
                 document.getElementById('combined-count').innerText = 
-                    `${totalServfail} errors / ${totalBlocked} blocked`;
+                    `${totalServfail} err / ${totalBlocked} blk / ${totalThreats} threat`;
 
                 // Update Domain List Table (in Popup)
                 const tbody = document.getElementById('analysis-list-body');
@@ -1754,6 +1792,7 @@ sudo systemctl restart dnsmasq
                             <td class="py-2 px-4 text-right">
                                 ${d.servfail > 0 ? '<span class="text-[9px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/30">SERVFAIL</span>' : ''}
                                 ${d.blocked > 0 ? '<span class="text-[9px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded border border-amber-500/30 ml-1">BLOCKED</span>' : ''}
+                                ${d.threat > 0 ? '<span class="text-[9px] bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded border border-purple-500/30 ml-1">THREAT</span>' : ''}
                             </td>
                             <td class="py-2 px-4 text-right font-orbitron text-slate-400">${d.total}</td>
                         </tr>

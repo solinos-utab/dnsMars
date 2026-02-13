@@ -4,28 +4,85 @@ firebaselogging.googleapis.com
 firebaselogging-pa.googleapis.com
 federatedcompute-pa.googleapis.com
 connectivitycheck.gstatic.com
+connectivitycheck.android.com
 android.clients.google.com
 clients3.google.com
+play.googleapis.com
+g.cn
+gstatic.com
+www.gstatic.com
+google.com
+www.google.com
 
 # Xiaomi / MIUI
 xiaomi.com
 miui.com
 xiaomi.net
+connect.rom.miui.com
+ame.ayjk.rom.miui.com
+b.miwifi.com
 
 # Oppo / Realme / OnePlus
 heytapmobi.com
 heytapmobile.com
 oppomobile.com
+conn1.oppomobile.com
+conn2.oppomobile.com
 
 # Vivo
 vivoglobal.com
 vivo.com
+wifi.vivo.com.cn
+i.vivo.com.cn
 
 # Windows / Microsoft
 msftconnecttest.com
+www.msftconnecttest.com
+ipv6.msftconnecttest.com
 msftncsi.com
+www.msftncsi.com
 
 # Apple
 apple.com
 icloud.com
 mzstatic.com
+captive.apple.com
+itunes.apple.com
+configuration.apple.com
+
+# Samsung
+connectivitycheck.samsungcloud.com
+
+# Huawei
+connectivitycheck.platform.hicloud.com
+connectivitycheck.hicloud.com
+
+# Infinix / Tecno / Itel (Transsion Holdings)
+connectivity.transsion.com
+connect.transsion.com
+
+# Asus
+connectivitycheck.asus.com
+
+# Sony
+connectivitycheck.sony.com
+
+# Motorola
+connectivitycheck.motorola.com
+
+# LG
+connectivitycheck.lge.com
+
+# Firefox / Linux
+detectportal.firefox.com
+nmcheck.gnome.org
+
+# Social Media & Apps (Prevent False Positives in Porn Lists)
+whatsapp.com
+facebook.com
+instagram.com
+tiktok.com
+youtube.com
+twitter.com
+linkedin.com
+reddit.com

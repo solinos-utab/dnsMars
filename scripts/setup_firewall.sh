@@ -214,17 +214,12 @@ done
 ip6tables -t nat -A PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null
 
 # --- HTTP/HTTPS INTERCEPTION UNTUK HALAMAN BLOKIR ---
-# Note: Intersepsi agresif port 80/443 dinonaktifkan untuk menghindari "Sign in to network" popup pada mobile.
-# Halaman blokir tetap bekerja melalui resolusi DNS ke IP server.
+# Intersepsi agresif port 80/443 telah dinonaktifkan sepenuhnya untuk mencegah popup "Sign in to network".
+# Halaman blokir HANYA bekerja jika DNS meresolve domain terblokir ke IP Server.
+# Trafik normal ke internet (HTTP/HTTPS) tidak boleh dibelokkan.
 
 iptables -t nat -A PREROUTING -p tcp --dport 80 -d $SERVER_IP -j ACCEPT
 iptables -t nat -A PREROUTING -p tcp --dport 443 -d $SERVER_IP -j ACCEPT
-
-# IPv6 HTTP/HTTPS Redirect
-if [ ! -z "$SERVER_IPV6" ]; then
-    ip6tables -t nat -A PREROUTING -p tcp --dport 80 ! -d $SERVER_IPV6 -j REDIRECT --to-ports 80 2>/dev/null || true
-    ip6tables -t nat -A PREROUTING -p tcp --dport 443 ! -d $SERVER_IPV6 -j REDIRECT --to-ports 443 2>/dev/null || true
-fi
 
 # 6. Restore Persistent Blocks from Guardian
 if [ "$DNS_TRUST_ENABLED" = true ]; then

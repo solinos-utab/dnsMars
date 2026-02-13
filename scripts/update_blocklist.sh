@@ -42,7 +42,26 @@ download_convert "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/d
 
 # --- 2. PREPARE PORN/GAMBLING LIST ---
 echo "[$(date)] Merging and sorting Porn/Gambling list..."
-cat "/tmp/gambling_raw" "/tmp/nsfw_raw" | sort | uniq > "/tmp/porn_sorted"
+cat "/tmp/gambling_raw" "/tmp/nsfw_raw" | sort | uniq > "/tmp/porn_raw_merged"
+
+# --- 2.5 FILTER OUT WHITELIST DOMAINS (PORN) ---
+WHITELIST_FILE="/home/dns/dnsMars/whitelist_domains.txt"
+if [ -f "$WHITELIST_FILE" ]; then
+    echo "[$(date)] Applying whitelist filter to Porn/Gambling list..."
+    
+    # Sanitize whitelist: remove comments and empty lines
+    sed '/^#/d; /^$/d' "$WHITELIST_FILE" > "/tmp/whitelist_clean"
+    
+    if [ -s "/tmp/whitelist_clean" ]; then
+        grep -v -F -f "/tmp/whitelist_clean" "/tmp/porn_raw_merged" > "/tmp/porn_sorted"
+    else
+        echo "[$(date)] Warning: Whitelist is empty!"
+        mv "/tmp/porn_raw_merged" "/tmp/porn_sorted"
+    fi
+else
+    echo "[$(date)] Warning: Whitelist file not found! Skipping filter."
+    mv "/tmp/porn_raw_merged" "/tmp/porn_sorted"
+fi
 
 # --- 3. PREPARE MALWARE LIST (REMOVE OVERLAPS) ---
 echo "[$(date)] Processing Malware list (removing overlaps)..."
@@ -52,26 +71,23 @@ sort "/tmp/malware_raw" | uniq > "/tmp/malware_sorted"
 # This ensures Malware list does NOT contain any domain present in the Porn list
 comm -23 "/tmp/malware_sorted" "/tmp/porn_sorted" > "/tmp/malware_no_porn"
 
-# --- 3.5 FILTER OUT WHITELIST DOMAINS ---
+# --- 3.5 FILTER OUT WHITELIST DOMAINS (MALWARE) ---
 # Critical step to prevent False Positive Block Pages on Android/Xiaomi/Vivo/Oppo
-WHITELIST_FILE="/home/dns/dnsMars/whitelist_domains.txt"
 if [ -f "$WHITELIST_FILE" ]; then
-    echo "[$(date)] Applying whitelist filter..."
+    echo "[$(date)] Applying whitelist filter to Malware list..."
     
-    # Sanitize whitelist: remove comments and empty lines
-    sed '/^#/d; /^$/d' "$WHITELIST_FILE" > "/tmp/whitelist_clean"
+    # Re-use cleaned whitelist if available, else regenerate
+    if [ ! -f "/tmp/whitelist_clean" ]; then
+        sed '/^#/d; /^$/d' "$WHITELIST_FILE" > "/tmp/whitelist_clean"
+    fi
     
-    # Filter out domains present in sanitized whitelist
-    # grep -v -F -f ensures strict string matching exclusion
     if [ -s "/tmp/whitelist_clean" ]; then
         grep -v -F -f "/tmp/whitelist_clean" "/tmp/malware_no_porn" > "/tmp/malware_final"
         rm -f "/tmp/whitelist_clean"
     else
-        echo "[$(date)] Warning: Whitelist is empty after cleaning!"
         mv "/tmp/malware_no_porn" "/tmp/malware_final"
     fi
 else
-    echo "[$(date)] Warning: Whitelist file not found! Skipping filter."
     mv "/tmp/malware_no_porn" "/tmp/malware_final"
 fi
 

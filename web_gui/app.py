@@ -129,6 +129,19 @@ def analyze_threat_candidates():
     except:
         pass
 
+    # Load Whitelist to prevent False Positives
+    whitelist = set()
+    try:
+        if os.path.exists('/etc/dnsmasq.d/whitelist.conf'):
+            with open('/etc/dnsmasq.d/whitelist.conf', 'r') as f:
+                for line in f:
+                    # Format: server=/domain/8.8.8.8
+                    match = re.search(r'server=/(.*?)/', line)
+                    if match:
+                        whitelist.add(match.group(1).lower())
+    except:
+        pass
+
     results = []
     try:
         # Extended Regex for comprehensive Botnet/Threat Detection
@@ -164,8 +177,26 @@ def analyze_threat_candidates():
                 
                 # CHECK IF BLOCKED (Smarter Check)
                 is_blacklisted = False
+                is_whitelisted = False
                 domain_lower = domain.lower()
                 
+                # Check Whitelist First
+                # 1. Exact match
+                if domain_lower in whitelist:
+                    is_whitelisted = True
+                
+                # 2. Parent domain match
+                if not is_whitelisted:
+                    parts_dom = domain_lower.split('.')
+                    for i in range(len(parts_dom)-1):
+                        parent = ".".join(parts_dom[i:])
+                        if parent in whitelist:
+                            is_whitelisted = True
+                            break
+                            
+                if is_whitelisted:
+                    continue # Skip this domain, it's safe
+
                 # 1. Exact match
                 if domain_lower in blacklist:
                     is_blacklisted = True
@@ -210,6 +241,29 @@ def analyze_threat_candidates():
                         threat_type = "C2 / BOTNET"
                     else:
                         threat_type = "SUSPICIOUS"
+
+                # THRESHOLD DETECTION (Learning Behavior)
+                # Botnets typically spam requests aggressively (high count).
+                # Normal traffic is usually lower frequency.
+                
+                request_count = int(count)
+                is_suspicious_behavior = False
+                
+                # 1. High Frequency Attack (DDoS / Botnet C2 Spam)
+                if request_count > 50: 
+                    is_suspicious_behavior = True
+                
+                # 2. Medium Frequency but clearly malicious pattern
+                elif request_count > 10 and keyword_match:
+                    is_suspicious_behavior = True
+                    
+                # 3. Low Frequency but highly specific dangerous pattern (e.g. miner)
+                elif request_count > 5 and threat_type == "CRYPTO MINER":
+                    is_suspicious_behavior = True
+
+                # Skip if it's just a few random queries (could be user typo or one-off app request)
+                if not is_suspicious_behavior:
+                    continue
 
                 results.append({'domain': domain, 'count': count, 'type': threat_type})
                 
@@ -420,87 +474,88 @@ def schedule_worker():
                 # BUT, the user toggles "enabled" in the UI to turn ON the feature.
                 # The "schedule" feature implies "Time Based Activation".
                 
-                # Logic Refinement:
-                # The 'trust_schedule' table 'enabled' flag means "Is Schedule Mode Active?".
-                # If Enabled: We check time. If inside window -> Trust ON. If outside -> Trust OFF.
-                # If Disabled: We DO NOT touch Trust state (Manual Mode).
+                # Logic Refinement (Fixed for Manual Override):
+                # If start_time == end_time (00:00 - 00:00): MANUAL MODE.
+                # If start_time != end_time: SCHEDULE MODE.
+                # If Manual Mode is set, Scheduler should NOT interfere with the 'enabled' state.
                 
-                # HOWEVER, the UI 'toggle_trust' endpoint updates this 'enabled' flag!
-                # See toggle_trust: c.execute("UPDATE trust_schedule SET enabled=? WHERE id=1", (db_enabled,))
+                should_be_active = False
+                is_schedule_mode = (start_time_str != end_time_str)
                 
-                # This implies 'enabled' = "Trust is ON".
-                # But then 'start_time' and 'end_time' are just attributes?
-                # If start_time == end_time (e.g. 00:00), maybe it means "Always On"?
-                
-                # User Requirement: "dns trust baik mode scedule dan manual tidak berjalan"
-                # This suggests there are TWO modes.
-                # Let's check how the UI likely works (inference).
-                # Usually: 
-                # Mode 1: Manual ON/OFF.
-                # Mode 2: Scheduled (ON during X to Y).
-                
-                # Current DB Schema: id, enabled, start_time, end_time.
-                # If I treat 'enabled' as "Global Master Switch", then:
-                # If enabled=1: Check Time. 
-                #    If Time 00:00-00:00 -> Always ON.
-                #    If Time Set -> ON only during window.
-                # If enabled=0: Always OFF.
-                
-                # BUT, 'toggle_trust' sets enabled=1 when user clicks "Enable".
-                # So if user clicks Enable, enabled=1.
-                # If they set a schedule, say 08:00 - 17:00.
-                # Then at 18:00, it should be OFF.
-                # At 18:00, enabled=1 (in DB), but outside window.
-                # So the worker should turn it OFF.
-                
-                # What happens if user manually clicks "Disable"?
-                # toggle_trust sets enabled=0. Worker sees enabled=0, ensures it's OFF.
-                
-                # What if user manually clicks "Enable" at 18:00 (outside schedule)?
-                # toggle_trust sets enabled=1.
-                # Worker sees enabled=1. Checks time (18:00). Outside window (08-17).
-                # Worker turns it OFF immediately!
-                # This prevents Manual Override outside schedule if Schedule is "Always Active".
-                
-                # To support both Manual and Schedule, we usually need a "mode" flag.
-                # Since we lack a "mode" column, let's assume:
-                # If start_time == end_time (00:00 - 00:00), it's MANUAL MODE (Always ON if enabled=1).
-                # If start_time != end_time, it's SCHEDULE MODE.
-                
-                if enabled:
-                    should_be_active = False
+                if is_schedule_mode:
+                    # Schedule Mode: Enforce time window
+                    now = datetime.now()
+                    current_time = now.strftime('%H:%M')
                     
-                    if start_time_str == end_time_str:
-                        # Manual Mode (Always On)
-                        should_be_active = True
+                    if start_time_str > end_time_str:
+                        if current_time >= start_time_str or current_time < end_time_str:
+                            should_be_active = True
                     else:
-                        # Schedule Mode
-                        now = datetime.now()
-                        current_time = now.strftime('%H:%M')
-                        
-                        # Handle cross-midnight (e.g. 22:00 to 06:00)
-                        if start_time_str > end_time_str:
-                            if current_time >= start_time_str or current_time < end_time_str:
-                                should_be_active = True
-                        else:
-                            if start_time_str <= current_time < end_time_str:
-                                should_be_active = True
+                        if start_time_str <= current_time < end_time_str:
+                            should_be_active = True
                     
-                    # Apply State
-                    trust_info = get_trust_info()
-                    is_currently_active = trust_info['enabled']
+                    # Apply State ONLY if in Schedule Mode
+                    # Logic Fix: If Schedule Mode is active, we MUST enforce the calculated state (should_be_active)
+                    # regardless of the current 'enabled' flag in DB (which reflects the last manual/auto state).
+                    # We update the DB to match the new state so the UI reflects it.
+                    
+                    # Logic Fix: Use PHYSICAL file check for actual state in Scheduler
+                    # Because get_trust_info() now returns DB state, we need to check the file directly
+                    # to know if we need to toggle the system.
+                    
+                    is_currently_active = os.path.exists('/etc/dnsmasq.d/internet_positif.conf')
                     
                     if should_be_active and not is_currently_active:
                         print(f"Schedule: Activating Trust (Time: {start_time_str}-{end_time_str})")
-                        # Call toggle logic internally
-                        # We can reuse the API logic or call a function.
-                        # Reusing API logic via requests is risky (auth).
-                        # Better extract toggle logic to a function.
-                        perform_trust_toggle(True)
-                        
+                        if perform_trust_toggle(True):
+                            # Update DB to reflect state
+                            try:
+                                conn_update = sqlite3.connect(DB_PATH)
+                                c_update = conn_update.cursor()
+                                c_update.execute("UPDATE trust_schedule SET enabled=1 WHERE id=1")
+                                conn_update.commit()
+                                conn_update.close()
+                            except: pass
+                            
                     elif not should_be_active and is_currently_active:
                         print(f"Schedule: Deactivating Trust (Time: {start_time_str}-{end_time_str})")
-                        perform_trust_toggle(False)
+                        if perform_trust_toggle(False):
+                            # Update DB to reflect state
+                            try:
+                                conn_update = sqlite3.connect(DB_PATH)
+                                c_update = conn_update.cursor()
+                                c_update.execute("UPDATE trust_schedule SET enabled=0 WHERE id=1")
+                                conn_update.commit()
+                                conn_update.close()
+                            except: pass
+                else:
+                    # Manual Mode: Check if actual state matches DB state
+                    # If DB says enabled=1 but actual is disabled, enable it.
+                    # If DB says enabled=0 but actual is enabled, disable it.
+                    # This fixes the UI toggle issue where refreshing reverts to actual file state instead of DB intent.
+                    
+                    is_currently_active = os.path.exists('/etc/dnsmasq.d/internet_positif.conf')
+                    
+                    if enabled and not is_currently_active:
+                         print("Manual Mode: Enforcing Enabled State")
+                         if perform_trust_toggle(True):
+                             try:
+                                 conn_update = sqlite3.connect(DB_PATH)
+                                 c_update = conn_update.cursor()
+                                 c_update.execute("UPDATE trust_schedule SET enabled=1 WHERE id=1")
+                                 conn_update.commit()
+                                 conn_update.close()
+                             except: pass
+                    elif not enabled and is_currently_active:
+                         print("Manual Mode: Enforcing Disabled State")
+                         if perform_trust_toggle(False):
+                             try:
+                                 conn_update = sqlite3.connect(DB_PATH)
+                                 c_update = conn_update.cursor()
+                                 c_update.execute("UPDATE trust_schedule SET enabled=0 WHERE id=1")
+                                 conn_update.commit()
+                                 conn_update.close()
+                             except: pass
                         
         except Exception as e:
             print(f"Schedule Worker Error: {e}")
@@ -518,27 +573,64 @@ autoblock_thread.start()
 def perform_trust_toggle(enable):
     blocklist_file = '/etc/dnsmasq.d/internet_positif.conf'
     blocklist_disabled = '/home/dns/blocklists/disabled/internet_positif.conf'
+    legacy_disabled = '/etc/dnsmasq.d/internet_positif.conf.disabled'
+    custom_trust_file = '/home/dns/blocklists/custom_trust.txt'
     
     # Ensure disabled directory exists
     if not os.path.exists('/home/dns/blocklists/disabled'):
         run_command('sudo mkdir -p /home/dns/blocklists/disabled')
         run_command('sudo chown dns:dns /home/dns/blocklists/disabled')
 
+    # Migrate legacy disabled file if present
+    if os.path.exists(legacy_disabled):
+        run_command(f"sudo mv {legacy_disabled} {blocklist_disabled}")
+
     if enable:
         # Enable Blocklist
         if os.path.exists(blocklist_disabled):
-            run_command(f"sudo mv {blocklist_disabled} {blocklist_file}")
+            # Keep a copy in disabled as backup
+            run_command(f"sudo cp {blocklist_disabled} {blocklist_file}")
         elif not os.path.exists(blocklist_file):
-            print("Blocklist file missing")
-            return False
+            # Attempt to populate blocklist via updater script
+            run_command("sudo bash /home/dns/update_blocklist.sh")
+            # After update, try again
+            if os.path.exists(blocklist_disabled):
+                run_command(f"sudo cp {blocklist_disabled} {blocklist_file}")
+            elif not os.path.exists(blocklist_file):
+                print("Blocklist file missing")
+                return False
+        
+        try:
+            if os.path.exists(custom_trust_file):
+                ip = get_server_ip()
+                with open(custom_trust_file, 'r') as f:
+                    custom_domains = [re.sub(r'[^a-zA-Z0-9.-]', '', d.strip()) for d in f if d.strip()]
+                if custom_domains:
+                    existing = set()
+                    try:
+                        with open(blocklist_file, 'r') as bf:
+                            for line in bf:
+                                m = re.search(r'address=/(.*?)/', line)
+                                if m:
+                                    existing.add(m.group(1).lower())
+                    except:
+                        pass
+                    lines_to_add = []
+                    for d in custom_domains:
+                        if d.lower() not in existing:
+                            lines_to_add.append(f"address=/{d}/{ip}\n")
+                    if lines_to_add:
+                        with open(blocklist_file, 'a') as bf:
+                            bf.writelines(lines_to_add)
+        except:
+            pass
         
         # Verify file moved
         if not os.path.exists(blocklist_file):
              run_command(f"sudo cp {blocklist_disabled} {blocklist_file}")
 
-        # Apply firewall rules
         run_command("sudo bash /home/dns/setup_firewall.sh")
-        safe_service_restart()
+        safe_service_restart(background=True)
         return True
     else:
         # Disable Blocklist
@@ -550,9 +642,8 @@ def perform_trust_toggle(enable):
         # Ensure no stray .disabled files
         run_command("sudo rm -f /etc/dnsmasq.d/*.disabled")
 
-        # Apply firewall rules
         run_command("sudo bash /home/dns/setup_firewall.sh")
-        safe_service_restart()
+        safe_service_restart(background=True)
         return True
 
 @app.route('/api/autoblock/config', methods=['GET', 'POST'])
@@ -809,42 +900,41 @@ traffic_data = []
 
 def get_traffic_stats():
     try:
-        # ISP Scale QPS: Use a 5-second sliding window
+        # Optimization: Use awk to count queries in the last 5 seconds directly in shell
+        # This is much faster than pulling 200k lines into Python
         now = datetime.now()
-        total_queries = 0
         window_size = 5
         
-        # Increase tail for ISP scale (200k lines handles up to 40k QPS over 5s)
-        # Assuming avg 20k QPS * 5s = 100k lines. Using 200k for safety margin.
-        cmd = "sudo tail -n 200000 /var/log/dnsmasq.log | grep 'query\\['"
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        # Count queries in the last 5 seconds using awk
+        # We look for 'query[' and check the timestamp (parts[2])
+        # Note: dnsmasq logs are in 'Feb 14 18:32:25' format
+        cmd = f"sudo tail -n 50000 /var/log/dnsmasq.log | awk -v now=\"$(date +%H:%M:%S)\" -v window={window_size} '" \
+              r'BEGIN { count=0; split(now, n, ":"); now_sec = n[1]*3600 + n[2]*60 + n[3]; } ' \
+              r'/query\[/ { ' \
+              r'  split($3, t, ":"); log_sec = t[1]*3600 + t[2]*60 + t[3]; ' \
+              r'  if (now_sec - log_sec <= window && now_sec - log_sec >= 0) count++; ' \
+              r"} END { print count }'"
         
-        if not result:
-            return 0, 0
-            
-        lines = result.split('\n')
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=3).stdout.strip()
         
-        # Count queries within the window
-        for line in reversed(lines): # Start from newest for speed
-            try:
-                parts = line.split()
-                if len(parts) < 3: continue
-                time_str = parts[2]
-                
-                log_time = datetime.strptime(time_str, '%H:%M:%S').replace(year=now.year, month=now.month, day=now.day)
-                diff = (now - log_time).total_seconds()
-                
-                if diff <= window_size:
-                    total_queries += 1
-                elif diff > window_size + 2: # Buffer for slight time drift
-                    break # Optimization: stop if we are way past the window
-            except:
-                continue
-                
+        total_queries = int(result) if result else 0
         qps = round(total_queries / window_size, 1)
-        snapshot = len(lines)
         
-        return qps, snapshot
+        # Optimization: Get actual Total Queries from log file count (Cumulative)
+        # This provides a different, cumulative metric for "Total Query" vs "QPS"
+        # We use grep -c which is fast enough for rotated logs (max 500MB)
+        cmd_count = "sudo grep -c 'query\\[' /var/log/dnsmasq.log"
+        try:
+            count_result = subprocess.run(cmd_count, shell=True, capture_output=True, text=True, timeout=2).stdout.strip()
+            real_total_queries = int(count_result) if count_result.isdigit() else 0
+        except Exception:
+            real_total_queries = 0
+            
+        # Fallback to snapshot estimation only if grep fails (which is rare)
+        if real_total_queries == 0:
+            real_total_queries = total_queries * 12
+        
+        return qps, real_total_queries
     except Exception as e:
         print(f"Error in get_traffic_stats: {e}")
         return 0, 0
@@ -855,7 +945,8 @@ def get_per_ip_traffic_stats(limit=20):
     Returns: {ip: queries, rate_limit_status}
     """
     try:
-        cmd = f"sudo tail -n 50000 /var/log/dnsmasq.log | grep 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        # Fixed: IP is at $8 in dnsmasq log format "Feb 14 18:32:25 dnsmasq[...]: query[A] domain from IP"
+        cmd = f"sudo tail -n 50000 /var/log/dnsmasq.log | grep 'query\\[' | awk '{{print $8}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
@@ -1510,14 +1601,17 @@ def safe_service_restart(background=False):
         def restart_task():
             # Add small delay to allow response to be sent
             time.sleep(0.5)
-            run_command("sudo systemctl restart dnsmasq")
-            run_command("sudo systemctl restart unbound")
+            # RELOAD dnsmasq (SIGHUP) instead of restart to prevent downtime
+            run_command("sudo pkill -HUP dnsmasq")
+            # Unbound needs restart for some config changes, but reload is better if possible
+            run_command("sudo systemctl reload-or-restart unbound")
         threading.Thread(target=restart_task).start()
-        return True, "Services restarting in background"
+        return True, "Services reloading in background"
     else:
-        run_command("sudo systemctl restart dnsmasq")
-        run_command("sudo systemctl restart unbound")
-        return True, "Services restarted successfully"
+        # RELOAD dnsmasq (SIGHUP)
+        run_command("sudo pkill -HUP dnsmasq")
+        run_command("sudo systemctl reload-or-restart unbound")
+        return True, "Services reloaded successfully"
 
 @app.route('/health')
 def health():
@@ -1674,12 +1768,23 @@ def get_network_info():
 
 def get_trust_info():
     try:
-        # Check if Internet Positif (Local Blocklist) is active
-        # We check if the config file exists and is NOT disabled
+        # Determine actual state primarily from file presence
         path = '/etc/dnsmasq.d/internet_positif.conf'
-        if os.path.exists(path):
-            return {'enabled': True, 'ip': 'Local DB'}
-        return {'enabled': False, 'ip': ''}
+        is_enabled = os.path.exists(path)
+        # Optional: if file missing, use DB intended state for display
+        if not is_enabled:
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("SELECT enabled FROM trust_schedule WHERE id=1")
+                row = c.fetchone()
+                conn.close()
+                if row:
+                    is_enabled = bool(row[0])
+            except:
+                pass
+
+        return {'enabled': is_enabled, 'ip': 'Local DB'}
     except:
         return {'enabled': False, 'ip': ''}
 
@@ -1857,7 +1962,7 @@ def list_domains(list_type):
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
             
-    return jsonify({'status': 'success', 'domains': domains})
+    return jsonify({'status': 'success', 'domains': domains, 'count': len(domains)})
 
 @app.route('/api/action', methods=['POST'])
 def action():
@@ -2169,6 +2274,14 @@ def trust_schedule():
                   (enabled, start_time, end_time, trust_ips))
         conn.commit()
         conn.close()
+
+        # APPLY CHANGES IMMEDIATELY
+        # If Manual Mode (00:00 - 00:00), we should enforce the 'enabled' state immediately
+        # Otherwise, the scheduler will pick it up, but immediate feedback is better.
+        
+        if start_time == '00:00' and end_time == '00:00':
+            perform_trust_toggle(bool(enabled))
+
         return jsonify({'status': 'success', 'message': 'Schedule updated'})
     
     c.execute("SELECT enabled, start_time, end_time, trust_ips FROM trust_schedule WHERE id=1")
@@ -2282,8 +2395,8 @@ def update_dnsmasq_config(new_settings):
             else:
                 f.write(line)
     
-    # Reload dnsmasq
-    subprocess.run("sudo systemctl restart dnsmasq", shell=True)
+    # Reload dnsmasq without downtime
+    subprocess.run("sudo pkill -HUP dnsmasq", shell=True)
 
 @app.route('/api/export/threats/pdf')
 def export_threats_pdf():

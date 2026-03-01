@@ -5,3 +5,8 @@ __pycache__/
 *.bak
 .DS_Store
 .env
+*.pem
+*.key
+*.hash
+license.key
+licenses_db.json

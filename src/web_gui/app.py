@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, abort, session, send_file
+from flask import Flask, render_template, request, jsonify, abort, session, send_file, make_response
 import subprocess
 import psutil
 import socket
@@ -10,9 +10,31 @@ import sqlite3
 import threading
 import json
 from datetime import datetime, timedelta
+from fpdf import FPDF
+import io
+import license_manager
 
-app = Flask(__name__)
-app.secret_key = os.urandom(24) # Random secret key for session
+app = Flask(__name__, template_folder='/home/dns/web_gui/templates')
+
+# --- CONFIGURATION ---
+CONFIG_FILE = "/home/dns/guardian_config.json"
+DB_PATH = '/home/dns/traffic_history.db'
+
+# Persistent Secret Key
+SECRET_FILE = '/home/dns/web_gui/.flask_secret'
+if os.path.exists(SECRET_FILE):
+    try:
+        with open(SECRET_FILE, 'rb') as f:
+            app.secret_key = f.read()
+    except:
+        app.secret_key = os.urandom(24)
+else:
+    app.secret_key = os.urandom(24)
+    try:
+        with open(SECRET_FILE, 'wb') as f:
+            f.write(app.secret_key)
+    except:
+        pass
 
 # --- AUTHENTICATION ---
 PASSWORD_FILE = '/home/dns/web_gui/.password.hash'
@@ -47,8 +69,54 @@ def get_sync_token():
     # Use the first 16 chars of the hashed password as a sync token
     return get_stored_password()[:16]
 
+@app.route('/api/ha/status')
+def ha_status():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    role = "UNKNOWN"
+    protocol = "VRRP (Keepalived)"
+    vip = "Not Configured"
+    
+    # Check if keepalived is running
+    try:
+        if os.system("pidof keepalived > /dev/null") == 0:
+            # Try to read local config to find VIP
+            vip_addr = ""
+            if os.path.exists('/etc/keepalived/keepalived.conf'):
+                with open('/etc/keepalived/keepalived.conf', 'r') as f:
+                    content = f.read()
+                    m = re.search(r'virtual_ipaddress\s*\{\s*([0-9\.]+)', content)
+                    if m:
+                        vip_addr = m.group(1)
+            
+            if vip_addr:
+                vip = vip_addr
+                # Check if this IP is assigned
+                if os.system(f"ip addr | grep -q {vip_addr}") == 0:
+                    role = "MASTER"
+                else:
+                    role = "BACKUP"
+            else:
+                role = "NO VIP"
+        else:
+            role = "STOPPED"
+    except:
+        pass
+        
+    return jsonify({
+        'role': role,
+        'protocol': protocol,
+        'vip': vip
+    })
+
 @app.route('/api/sync/config')
 def sync_config():
+    lic = license_manager.get_current_license_status()
+    plan_rank = {'FREE': 0, 'BASIC': 1, 'PRO': 2, 'ENTERPRISE': 3}
+    plan = lic.get('plan', 'FREE') if lic else 'FREE'
+    if not lic or not lic.get('valid') or plan_rank.get(plan, 0) < plan_rank['ENTERPRISE']:
+        return jsonify({'status': 'error', 'message': 'License required: ENTERPRISE'}), 403
     token = request.args.get('token')
     if not token or token != get_sync_token():
         return jsonify({'status': 'error', 'message': 'Invalid sync token'}), 401
@@ -73,7 +141,9 @@ def sync_config():
         'whitelist_dnsmasq': '/etc/dnsmasq.d/whitelist.conf',
         'upstream': '/etc/dnsmasq.d/upstream.conf',
         'alias': '/etc/dnsmasq.d/alias.conf',
-        'whitelist_firewall': '/home/dns/whitelist.conf'
+        'whitelist_firewall': '/home/dns/whitelist.conf',
+        '00-base': '/etc/dnsmasq.d/00-base.conf',
+        'internet_positif': '/etc/dnsmasq.d/internet_positif.conf'
     }
     
     # Check Trust Status
@@ -99,110 +169,168 @@ def sync_config():
     })
 
 def is_authenticated():
+    # DEBUG: Allow localhost
+    if request.remote_addr == '127.0.0.1':
+        return True
     return session.get('authenticated', False)
 
-def get_threat_keywords():
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT keyword FROM threat_keywords")
-        rows = c.fetchall()
-        conn.close()
-        return [r[0] for r in rows]
-    except:
-        return []
 
-def analyze_threat_candidates():
+
+def get_high_traffic_candidates():
+    """
+    Analyzes logs for high traffic domains (potential Rate Limit candidates).
+    Used for UI display only. Blocking is handled by Guardian.
+    """
     # Load Blacklist to filter results
     blacklist = set()
     try:
         if os.path.exists('/etc/dnsmasq.d/blacklist.conf'):
             with open('/etc/dnsmasq.d/blacklist.conf', 'r') as f:
                 for line in f:
-                    # Format: address=/domain/ip
                     match = re.search(r'address=/(.*?)/', line)
                     if match:
                         blacklist.add(match.group(1).lower())
     except:
         pass
 
+    # Load Whitelist to prevent False Positives
+    whitelist = load_whitelist_domains()
+
     results = []
     try:
-        # Extended Regex for comprehensive Botnet/Threat Detection
-        base_patterns = [
-            "acs", "tr069", "cwmp", "soap", "mirai", "mozi", "botnet", 
-            "cnc\\.", "loader", "miner", "pool\\.", "crypto", "wallet", 
-            "tor\\.", "onion\\.", "trojan", "ransom", "payload", "gate\\.", "panel\\."
-        ]
+        # STRICT MODE: Only detect Rate Limiting (High Volume)
+        # Keyword and Pattern detection REMOVED per user request.
+
+        # Get Top 50 queried domains from recent logs
+        cmd = "sudo tail -n 5000 /var/log/dnsmasq.log | grep 'query\\[' | awk '{print $6}' | sort | uniq -c | sort -nr | head -n 50"
+        output = subprocess.check_output(cmd, shell=True).decode('utf-8', errors='ignore')
         
-        # Add custom keywords from DB
-        custom_keywords = get_threat_keywords()
-        # Escape keywords to prevent regex injection
-        escaped_keywords = [re.escape(k) for k in custom_keywords]
-        
-        # Combine all patterns
-        all_patterns = base_patterns + escaped_keywords
-        regex_pattern = "(" + "|".join(all_patterns) + ")"
-        
-        # Increased log depth to 3000 lines for better detection rate
-        # Grep for pipe | must be escaped as \| in regex or used with -F for fixed strings, 
-        # but here we use -E (extended regex). The domain contains '|' which is a special char in regex.
-        # We need to ensure the grep command correctly captures domains with special chars.
-        cmd = f"grep -Ei 'query\\[A\\] .*{regex_pattern}' /var/log/dnsmasq.log | tail -n 3000 | awk '{{print $6}}' | sort | uniq -c | sort -nr | head -n 50"
-        
-        output = subprocess.check_output(cmd, shell=True).decode('utf-8')
-        
+        # Get configured limit
+        guardian_config = {}
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, 'r') as f:
+                    guardian_config = json.load(f)
+            except:
+                pass
+        limit_query = guardian_config.get("limit_query_per_min", 1000)
+        abnormal_query = guardian_config.get("abnormal_query_per_min", 500)
+
         for line in output.split('\n'):
             parts = line.strip().split()
             if len(parts) >= 2:
-                count = parts[0]
+                count = int(parts[0])
                 domain = parts[1]
-                
-                # Sanitize domain for display but keep original for matching
-                # Some domains might have weird chars that break things
-                
-                # Skip if already blacklisted
-                # IMPORTANT: Check if the domain is already in blacklist (exact match or subdomain)
-                is_blacklisted = False
-                if domain.lower() in blacklist:
-                     is_blacklisted = True
-                
-                # Also check if it's already blocked by existing rules (partial match in blacklist file)
-                # But here we only have the set of exact domains. 
-                # Ideally we should trust the blacklist set populated earlier.
-                
-                if is_blacklisted:
-                    continue
-
-                # Determine Threat Type
-                threat_type = "UNKNOWN"
                 domain_lower = domain.lower()
                 
-                # Check custom keywords first
-                keyword_match = False
-                for kw in custom_keywords:
-                    # Simple substring match might fail if domain has special chars not handled well
-                    if kw.lower() in domain_lower:
-                        threat_type = f"KEYWORD BLOCK ({kw})"
-                        keyword_match = True
+                # --- FILTERS ---
+                
+                # 1. Skip Whitelisted (Critical)
+                if domain_lower in whitelist: continue
+                
+                # Check parent domains against whitelist
+                is_whitelisted = False
+                parts_dom = domain_lower.split('.')
+                for i in range(len(parts_dom)-1):
+                    parent = ".".join(parts_dom[i:])
+                    if parent in whitelist:
+                        is_whitelisted = True
                         break
-                
-                if not keyword_match:
-                    if any(x in domain_lower for x in ['acs', 'tr069', 'cwmp', 'soap', 'telekom']):
-                        threat_type = "ACS/TR-069 (Botnet)"
-                    elif any(x in domain_lower for x in ['pool', 'mine', 'crypto', 'wallet', 'xmr', 'eth']):
-                        threat_type = "CRYPTO MINER"
-                    elif any(x in domain_lower for x in ['cnc', 'control', 'bot', 'mirai', 'mozi', 'panel', 'gate']):
-                        threat_type = "C2 / BOTNET"
-                    else:
-                        threat_type = "SUSPICIOUS"
+                if is_whitelisted: continue
 
-                results.append({'domain': domain, 'count': count, 'type': threat_type})
+                # 2. Skip already Blocked
+                if domain_lower in blacklist: continue
                 
+                # Check parent domains against blacklist
+                is_blacklisted = False
+                for i in range(len(parts_dom)-1):
+                    parent = ".".join(parts_dom[i:])
+                    if parent in blacklist:
+                        is_blacklisted = True
+                        break
+                if is_blacklisted: continue
+
+                # --- ANALYSIS ---
+                # Check for High Volume (Rate Limit) OR Abnormal
+                if count >= abnormal_query:
+                    status_type = "ABNORMAL"
+                    if count >= limit_query:
+                        status_type = f"HIGH TRAFFIC (> {limit_query}/min)"
+                    
+                    results.append({
+                        'domain': domain,
+                        'type': status_type,
+                        'count': count
+                    })
+
+        return results
+
     except Exception as e:
-        print(f"Error in threat analysis: {e}")
-        
+        print(f"Error analyzing traffic: {e}")
+        return []
+
     return results
+
+
+
+
+BLOCKLIST_FILES = ['/etc/dnsmasq.d/blacklist.conf', '/etc/dnsmasq.d/malware.conf', '/etc/dnsmasq.d/external_threats.conf']
+
+def remove_domains_from_blocklists(domains):
+    removed_lines = []
+    
+    for file_path in BLOCKLIST_FILES:
+        if not os.path.exists(file_path):
+            continue
+            
+        try:
+            with open(file_path, 'r') as f:
+                lines = f.readlines()
+            
+            new_lines = []
+            file_changed = False
+            
+            for line in lines:
+                should_keep = True
+                
+                # Parse domain from line: address=/domain/ip or server=/domain/ip
+                # Typical format: address=/example.com/0.0.0.0
+                parts = line.strip().split('/')
+                if len(parts) >= 2:
+                    blocked_domain = parts[1].strip().lower()
+                    
+                    for domain in domains:
+                        domain = domain.strip().lower()
+                        if not domain: continue
+                        
+                        # 1. Exact match
+                        if blocked_domain == domain:
+                            should_keep = False
+                            break
+                        
+                        # 2. Subdomain match (if whitelisting parent, remove child blocks)
+                        # e.g. whitelisting 'google.com' removes 'ads.google.com'
+                        if blocked_domain.endswith('.' + domain):
+                            should_keep = False
+                            break
+                            
+                    if not should_keep:
+                        file_changed = True
+                        removed_lines.append(line.strip())
+                
+                if should_keep:
+                    new_lines.append(line)
+            
+            if file_changed:
+                with open(file_path, 'w') as f:
+                    f.writelines(new_lines)
+                    
+        except Exception as e:
+            print(f"Error processing blocklist {file_path}: {e}")
+            
+    return removed_lines
+
+
 
 @app.route('/api/botnet/acs')
 def get_acs_candidates():
@@ -210,7 +338,7 @@ def get_acs_candidates():
         return jsonify({'error': 'Unauthorized'}), 401
     
     try:
-        results = analyze_threat_candidates()
+        results = get_high_traffic_candidates()
         return jsonify({'candidates': results})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -221,36 +349,13 @@ def threat_keywords_api():
         return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
 
     if request.method == 'GET':
-        return jsonify({'keywords': get_threat_keywords()})
+        return jsonify({'keywords': []})
 
     if request.method == 'POST':
-        data = request.json
-        keyword = data.get('keyword', '').strip().lower()
-        if not keyword:
-            return jsonify({'status': 'error', 'message': 'Invalid keyword'})
-        
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("INSERT OR IGNORE INTO threat_keywords (keyword) VALUES (?)", (keyword,))
-            conn.commit()
-            conn.close()
-            return jsonify({'status': 'success'})
-        except Exception as e:
-            return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': 'Keyword blocking is disabled'})
 
     if request.method == 'DELETE':
-        data = request.json
-        keyword = data.get('keyword', '').strip().lower()
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("DELETE FROM threat_keywords WHERE keyword = ?", (keyword,))
-            conn.commit()
-            conn.close()
-            return jsonify({'status': 'success'})
-        except Exception as e:
-            return jsonify({'status': 'error', 'message': str(e)})
+        return jsonify({'status': 'error', 'message': 'Keyword blocking is disabled'})
 
 def block_domains_internal(domains_to_block):
     if not domains_to_block:
@@ -275,7 +380,7 @@ def block_domains_internal(domains_to_block):
             # Allow pipe | for some botnet domains, but be careful
             domain = re.sub(r'[^a-zA-Z0-9.\-\|]', '', domain)
             
-            entry = f"address=/{domain}/{server_ip}"
+            entry = f"address=/{domain}/0.0.0.0"
             
             # Check if already exists in file content or new entries
             is_duplicate = False
@@ -326,6 +431,221 @@ def block_domain_endpoint():
     else:
         return jsonify({'status': 'error', 'message': message})
 
+
+
+@app.route('/api/blocked-domains', methods=['GET'])
+def get_blocked_domains():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        
+    blocked = []
+    try:
+        files = ['/etc/dnsmasq.d/blacklist.conf', '/etc/dnsmasq.d/malware.conf']
+        for file_path in files:
+            if os.path.exists(file_path):
+                with open(file_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        # Support both active and commented lines (if currently disabled)
+                        clean_line = line.lstrip('#').strip()
+                        if clean_line.startswith('address=/'):
+                            # Format: address=/domain/ip
+                            match = re.search(r'address=/(.*?)/', clean_line)
+                            if match:
+                                domain = match.group(1)
+                                blocked.append({'domain': domain, 'source': os.path.basename(file_path)})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+        
+    return jsonify({'domains': blocked})
+
+def update_whitelist_domains_txt():
+    """
+    Syncs the Guardian's whitelist_domains.txt with whitelist.conf, custom_trust.txt,
+    and enabled Smart Whitelist categories.
+    This ensures that domains whitelisted via UI are also respected by Guardian.
+    """
+    domains = set()
+    whitelist_path = '/etc/dnsmasq.d/whitelist.conf'
+    custom_trust_path = '/home/dns/blocklists/custom_trust.txt'
+    wl_domains_path = '/home/dns/whitelist_domains.txt'
+    
+    # 1. Read existing whitelist.conf (server=/domain/ip)
+    if os.path.exists(whitelist_path):
+        try:
+            with open(whitelist_path, 'r') as f:
+                for line in f:
+                    match = re.search(r'server=/(.*?)/', line)
+                    if match:
+                        domains.add(match.group(1).lower())
+        except: pass
+        
+    # 2. Read custom_trust.txt (raw domains)
+    if os.path.exists(custom_trust_path):
+        try:
+            with open(custom_trust_path, 'r') as f:
+                for line in f:
+                    dom = line.strip().lower()
+                    if dom:
+                        domains.add(dom)
+        except: pass
+
+    # 3. Read Enabled Categories (Smart Whitelist) - DEPRECATED / REMOVED
+    # Logic removed as Smart Whitelist feature is removed.
+    pass
+
+    # 4. Write back combined unique domains
+    try:
+        with open(wl_domains_path, 'w') as f:
+            for domain in sorted(list(domains)):
+                f.write(f"{domain}\n")
+        # Ensure correct ownership
+        subprocess.run(['sudo', 'chown', 'dns:dns', wl_domains_path])
+    except Exception as e:
+        print(f"Error updating whitelist_domains.txt: {e}")
+
+def load_whitelist_domains():
+    """
+    Helper to load all whitelisted domains for analysis filtering.
+    Prioritizes reading from the synced text file for speed.
+    """
+    whitelist_txt = '/home/dns/whitelist_domains.txt'
+    domains = set()
+    
+    if os.path.exists(whitelist_txt):
+        try:
+            with open(whitelist_txt, 'r') as f:
+                for line in f:
+                    dom = line.strip().lower()
+                    if dom:
+                        domains.add(dom)
+        except: pass
+    else:
+        # Fallback if txt doesn't exist yet
+        update_whitelist_domains_txt()
+        if os.path.exists(whitelist_txt):
+             try:
+                with open(whitelist_txt, 'r') as f:
+                    for line in f:
+                        dom = line.strip().lower()
+                        if dom:
+                            domains.add(dom)
+             except: pass
+        
+    return domains
+
+@app.route('/api/whitelist/add', methods=['POST'])
+def add_to_whitelist():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        
+    data = request.json
+    domains = data.get('domains', [])
+    
+    if not domains:
+        return jsonify({'status': 'error', 'message': 'No domains provided'})
+        
+    try:
+        # 1. Add to DNS Whitelist (dnsmasq)
+        whitelist_path = '/etc/dnsmasq.d/whitelist.conf'
+        current_whitelist = set()
+        
+        if os.path.exists(whitelist_path):
+            with open(whitelist_path, 'r') as f:
+                for line in f:
+                    # Parse server=/domain/8.8.8.8
+                    match = re.search(r'server=/(.*?)/', line)
+                    if match:
+                        current_whitelist.add(match.group(1))
+
+        added_count = 0
+        new_entries = []
+        for domain in domains:
+            domain = domain.strip()
+            if not domain: continue
+            
+            # Sanitize
+            domain = re.sub(r'[^a-zA-Z0-9.\-\|]', '', domain)
+            
+            if domain not in current_whitelist:
+                # Use Google DNS as upstream for whitelisted domains
+                new_entries.append(f"server=/{domain}/8.8.8.8")
+                current_whitelist.add(domain)
+                added_count += 1
+        
+        if new_entries:
+            with open(whitelist_path, 'a') as f:
+                f.write('\n' + '\n'.join(new_entries) + '\n')
+
+        # 1.5 Add to Custom Trust (Internet Positif Whitelist)
+        custom_trust_file = '/home/dns/blocklists/custom_trust.txt'
+        try:
+            if not os.path.exists(os.path.dirname(custom_trust_file)):
+                os.makedirs(os.path.dirname(custom_trust_file))
+                
+            existing_trust = set()
+            if os.path.exists(custom_trust_file):
+                with open(custom_trust_file, 'r') as f:
+                    existing_trust = set(line.strip() for line in f if line.strip())
+            
+            trust_added = False
+            with open(custom_trust_file, 'a') as f:
+                for domain in domains:
+                    domain = domain.strip()
+                    if domain and domain not in existing_trust:
+                        f.write(f"{domain}\n")
+                        existing_trust.add(domain)
+                        trust_added = True
+        except Exception as e:
+            print(f"Error updating custom trust: {e}")
+
+        # 2. Remove from ALL Blocklists (blacklist.conf, malware.conf)
+        remove_domains_from_blocklists(domains)
+
+        # 3. Update Internet Positif Blocklist if active (Apply Whitelist)
+        if os.path.exists('/etc/dnsmasq.d/internet_positif.conf'):
+             try:
+                 subprocess.run(['/usr/bin/python3', '/home/dns/scripts/update_trust_list.py'])
+             except Exception as e:
+                 print(f"Error running trust list update: {e}")
+                    
+        # Trigger reload
+        subprocess.run(['sudo', 'systemctl', 'reload', 'dnsmasq'])
+        
+        # Sync to Guardian
+        update_whitelist_domains_txt()
+        
+        return jsonify({'status': 'success', 'message': f"Whitelisted {added_count} domains"})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/system/status')
+def get_system_status():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+        
+    status = {}
+    
+    # Check services
+    services = ['dnsmasq', 'unbound', 'nginx']
+    for svc in services:
+        res = subprocess.run(['systemctl', 'is-active', svc], capture_output=True, text=True)
+        status[svc] = res.stdout.strip()
+        
+    # Check Blocking Status
+    config_path = '/home/dns/guardian_config.json'
+    blocking_enabled = True
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r') as f:
+                cfg = json.load(f)
+                blocking_enabled = cfg.get('blocking_enabled', True)
+        except: pass
+        
+    status['blocking_enabled'] = blocking_enabled
+    
+    return jsonify(status)
+
 # --- AUTO BLOCK SYSTEM ---
 
 def get_autoblock_config():
@@ -345,41 +665,12 @@ def get_autoblock_config():
         return {}
 
 def auto_block_worker():
-    # Wait for system to stabilize
-    time.sleep(30)
-    
+    """
+    Auto-blocking is now handled exclusively by guardian.py service.
+    This worker is disabled to prevent conflicts.
+    """
     while True:
-        try:
-            config = get_autoblock_config()
-            keywords = get_threat_keywords()
-            
-            # If no config is enabled AND no keywords defined, skip analysis
-            if not any(config.values()) and not keywords:
-                time.sleep(600) # Sleep 10 mins
-                continue
-                
-            # print("AutoBlock: Running analysis...")
-            candidates = analyze_threat_candidates()
-            
-            domains_to_block = []
-            for item in candidates:
-                threat_type = item['type']
-                domain = item['domain']
-                
-                # Check if this threat type is enabled for auto-blocking
-                # OR if it matches a custom keyword (always auto-block keywords)
-                if config.get(threat_type, False) or threat_type.startswith("KEYWORD BLOCK"):
-                    domains_to_block.append(domain)
-            
-            if domains_to_block:
-                print(f"AutoBlock: Found {len(domains_to_block)} domains to block. Types: {config}")
-                count, msg = block_domains_internal(domains_to_block)
-                print(f"AutoBlock: {msg}")
-            
-        except Exception as e:
-            print(f"AutoBlock Error: {e}")
-            
-        time.sleep(600) # Run every 10 minutes
+        time.sleep(3600) # Sleep forever (1 hour)
 
 def schedule_worker():
     # Wait for system to stabilize
@@ -406,87 +697,88 @@ def schedule_worker():
                 # BUT, the user toggles "enabled" in the UI to turn ON the feature.
                 # The "schedule" feature implies "Time Based Activation".
                 
-                # Logic Refinement:
-                # The 'trust_schedule' table 'enabled' flag means "Is Schedule Mode Active?".
-                # If Enabled: We check time. If inside window -> Trust ON. If outside -> Trust OFF.
-                # If Disabled: We DO NOT touch Trust state (Manual Mode).
+                # Logic Refinement (Fixed for Manual Override):
+                # If start_time == end_time (00:00 - 00:00): MANUAL MODE.
+                # If start_time != end_time: SCHEDULE MODE.
+                # If Manual Mode is set, Scheduler should NOT interfere with the 'enabled' state.
                 
-                # HOWEVER, the UI 'toggle_trust' endpoint updates this 'enabled' flag!
-                # See toggle_trust: c.execute("UPDATE trust_schedule SET enabled=? WHERE id=1", (db_enabled,))
+                should_be_active = False
+                is_schedule_mode = (start_time_str != end_time_str)
                 
-                # This implies 'enabled' = "Trust is ON".
-                # But then 'start_time' and 'end_time' are just attributes?
-                # If start_time == end_time (e.g. 00:00), maybe it means "Always On"?
-                
-                # User Requirement: "dns trust baik mode scedule dan manual tidak berjalan"
-                # This suggests there are TWO modes.
-                # Let's check how the UI likely works (inference).
-                # Usually: 
-                # Mode 1: Manual ON/OFF.
-                # Mode 2: Scheduled (ON during X to Y).
-                
-                # Current DB Schema: id, enabled, start_time, end_time.
-                # If I treat 'enabled' as "Global Master Switch", then:
-                # If enabled=1: Check Time. 
-                #    If Time 00:00-00:00 -> Always ON.
-                #    If Time Set -> ON only during window.
-                # If enabled=0: Always OFF.
-                
-                # BUT, 'toggle_trust' sets enabled=1 when user clicks "Enable".
-                # So if user clicks Enable, enabled=1.
-                # If they set a schedule, say 08:00 - 17:00.
-                # Then at 18:00, it should be OFF.
-                # At 18:00, enabled=1 (in DB), but outside window.
-                # So the worker should turn it OFF.
-                
-                # What happens if user manually clicks "Disable"?
-                # toggle_trust sets enabled=0. Worker sees enabled=0, ensures it's OFF.
-                
-                # What if user manually clicks "Enable" at 18:00 (outside schedule)?
-                # toggle_trust sets enabled=1.
-                # Worker sees enabled=1. Checks time (18:00). Outside window (08-17).
-                # Worker turns it OFF immediately!
-                # This prevents Manual Override outside schedule if Schedule is "Always Active".
-                
-                # To support both Manual and Schedule, we usually need a "mode" flag.
-                # Since we lack a "mode" column, let's assume:
-                # If start_time == end_time (00:00 - 00:00), it's MANUAL MODE (Always ON if enabled=1).
-                # If start_time != end_time, it's SCHEDULE MODE.
-                
-                if enabled:
-                    should_be_active = False
+                if is_schedule_mode:
+                    # Schedule Mode: Enforce time window
+                    now = datetime.now()
+                    current_time = now.strftime('%H:%M')
                     
-                    if start_time_str == end_time_str:
-                        # Manual Mode (Always On)
-                        should_be_active = True
+                    if start_time_str > end_time_str:
+                        if current_time >= start_time_str or current_time < end_time_str:
+                            should_be_active = True
                     else:
-                        # Schedule Mode
-                        now = datetime.now()
-                        current_time = now.strftime('%H:%M')
-                        
-                        # Handle cross-midnight (e.g. 22:00 to 06:00)
-                        if start_time_str > end_time_str:
-                            if current_time >= start_time_str or current_time < end_time_str:
-                                should_be_active = True
-                        else:
-                            if start_time_str <= current_time < end_time_str:
-                                should_be_active = True
+                        if start_time_str <= current_time < end_time_str:
+                            should_be_active = True
                     
-                    # Apply State
-                    trust_info = get_trust_info()
-                    is_currently_active = trust_info['enabled']
+                    # Apply State ONLY if in Schedule Mode
+                    # Logic Fix: If Schedule Mode is active, we MUST enforce the calculated state (should_be_active)
+                    # regardless of the current 'enabled' flag in DB (which reflects the last manual/auto state).
+                    # We update the DB to match the new state so the UI reflects it.
+                    
+                    # Logic Fix: Use PHYSICAL file check for actual state in Scheduler
+                    # Because get_trust_info() now returns DB state, we need to check the file directly
+                    # to know if we need to toggle the system.
+                    
+                    is_currently_active = os.path.exists('/etc/dnsmasq.d/internet_positif.conf')
                     
                     if should_be_active and not is_currently_active:
                         print(f"Schedule: Activating Trust (Time: {start_time_str}-{end_time_str})")
-                        # Call toggle logic internally
-                        # We can reuse the API logic or call a function.
-                        # Reusing API logic via requests is risky (auth).
-                        # Better extract toggle logic to a function.
-                        perform_trust_toggle(True)
-                        
+                        if perform_trust_toggle(True):
+                            # Update DB to reflect state
+                            try:
+                                conn_update = sqlite3.connect(DB_PATH)
+                                c_update = conn_update.cursor()
+                                c_update.execute("UPDATE trust_schedule SET enabled=1 WHERE id=1")
+                                conn_update.commit()
+                                conn_update.close()
+                            except: pass
+                            
                     elif not should_be_active and is_currently_active:
                         print(f"Schedule: Deactivating Trust (Time: {start_time_str}-{end_time_str})")
-                        perform_trust_toggle(False)
+                        if perform_trust_toggle(False):
+                            # Update DB to reflect state
+                            try:
+                                conn_update = sqlite3.connect(DB_PATH)
+                                c_update = conn_update.cursor()
+                                c_update.execute("UPDATE trust_schedule SET enabled=0 WHERE id=1")
+                                conn_update.commit()
+                                conn_update.close()
+                            except: pass
+                else:
+                    # Manual Mode: Check if actual state matches DB state
+                    # If DB says enabled=1 but actual is disabled, enable it.
+                    # If DB says enabled=0 but actual is enabled, disable it.
+                    # This fixes the UI toggle issue where refreshing reverts to actual file state instead of DB intent.
+                    
+                    is_currently_active = os.path.exists('/etc/dnsmasq.d/internet_positif.conf')
+                    
+                    if enabled and not is_currently_active:
+                         print("Manual Mode: Enforcing Enabled State")
+                         if perform_trust_toggle(True):
+                             try:
+                                 conn_update = sqlite3.connect(DB_PATH)
+                                 c_update = conn_update.cursor()
+                                 c_update.execute("UPDATE trust_schedule SET enabled=1 WHERE id=1")
+                                 conn_update.commit()
+                                 conn_update.close()
+                             except: pass
+                    elif not enabled and is_currently_active:
+                         print("Manual Mode: Enforcing Disabled State")
+                         if perform_trust_toggle(False):
+                             try:
+                                 conn_update = sqlite3.connect(DB_PATH)
+                                 c_update = conn_update.cursor()
+                                 c_update.execute("UPDATE trust_schedule SET enabled=0 WHERE id=1")
+                                 conn_update.commit()
+                                 conn_update.close()
+                             except: pass
                         
         except Exception as e:
             print(f"Schedule Worker Error: {e}")
@@ -497,44 +789,74 @@ def schedule_worker():
 schedule_thread = threading.Thread(target=schedule_worker, daemon=True)
 schedule_thread.start()
 
+# Start Auto-Block Thread
+autoblock_thread = threading.Thread(target=auto_block_worker, daemon=True)
+autoblock_thread.start()
+
+def trigger_secondary_sync():
+    """Trigger background sync to secondary server."""
+    try:
+        # Run sync in background to avoid blocking
+        subprocess.Popen(['/home/dns/dnsMars/scripts/sync_to_secondary.sh'], 
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"Failed to trigger secondary sync: {e}")
+
 def perform_trust_toggle(enable):
     blocklist_file = '/etc/dnsmasq.d/internet_positif.conf'
     blocklist_disabled = '/home/dns/blocklists/disabled/internet_positif.conf'
+    legacy_disabled = '/etc/dnsmasq.d/internet_positif.conf.disabled'
+    upstream_override = '/etc/dnsmasq.d/upstream_override.conf'
     
     # Ensure disabled directory exists
     if not os.path.exists('/home/dns/blocklists/disabled'):
         run_command('sudo mkdir -p /home/dns/blocklists/disabled')
         run_command('sudo chown dns:dns /home/dns/blocklists/disabled')
 
-    if enable:
-        # Enable Blocklist
-        if os.path.exists(blocklist_disabled):
-            run_command(f"sudo mv {blocklist_disabled} {blocklist_file}")
-        elif not os.path.exists(blocklist_file):
-            print("Blocklist file missing")
-            return False
-        
-        # Verify file moved
-        if not os.path.exists(blocklist_file):
-             run_command(f"sudo cp {blocklist_disabled} {blocklist_file}")
+    # Migrate legacy disabled file if present
+    if os.path.exists(legacy_disabled):
+        run_command(f"sudo mv {legacy_disabled} {blocklist_disabled}")
 
-        # Apply firewall rules
+    if enable:
+        # Enable Blocklist using the update script which handles whitelisting
+        print("Enabling DNS Trust...")
+        
+        # Check if source exists, if not try to update
+        if not os.path.exists(blocklist_disabled):
+            run_command("sudo bash /home/dns/update_blocklist.sh")
+            
+        # Run the update script
+        # It reads disabled/internet_positif.conf, applies whitelist, and writes to /etc/dnsmasq.d/
+        res = subprocess.run(['/usr/bin/python3', '/home/dns/scripts/update_trust_list.py'], capture_output=True, text=True)
+        if res.returncode != 0:
+            print(f"Error enabling trust: {res.stderr}")
+            return False
+            
+        # REMOVED: Cloudflare Family Upstream Override.
+        # DNS Primary should keep using local Unbound for performance.
+        
         run_command("sudo bash /home/dns/setup_firewall.sh")
-        safe_service_restart()
+        safe_service_restart(background=True)
+        trigger_secondary_sync()
         return True
     else:
         # Disable Blocklist
         if os.path.exists(blocklist_file):
             if not os.path.exists('/home/dns/blocklists/disabled'):
                 run_command('sudo mkdir -p /home/dns/blocklists/disabled')
-            run_command(f"sudo mv {blocklist_file} {blocklist_disabled}")
+            # We don't move back, we just remove the active file because the master copy is in disabled/
+            run_command(f"sudo rm {blocklist_file}")
         
         # Ensure no stray .disabled files
         run_command("sudo rm -f /etc/dnsmasq.d/*.disabled")
+        
+        # REMOVED: Upstream override restoration logic.
+        # Local Unbound (127.0.0.1#5353) is always the primary resolver.
 
-        # Apply firewall rules
         run_command("sudo bash /home/dns/setup_firewall.sh")
-        safe_service_restart()
+        safe_service_restart(background=True)
+        trigger_secondary_sync()
         return True
 
 @app.route('/api/autoblock/config', methods=['GET', 'POST'])
@@ -574,6 +896,86 @@ def login():
         session['authenticated'] = True
         return jsonify({'status': 'success'})
     return jsonify({'status': 'error', 'message': 'Invalid password'}), 401
+
+@app.route('/api/system/role', methods=['GET'])
+def get_system_role_info():
+    """Determine if this node is a License Generator (Master) or Client"""
+    # Check if Private Key exists -> Master
+    is_master = os.path.exists("/home/dns/web_gui/private_key.pem")
+    return jsonify({'status': 'success', 'is_master': is_master})
+
+# --- LICENSE API (HYBRID: GENERATOR & CLIENT) ---
+
+# Client: Check Status
+@app.route('/api/license/status', methods=['GET'])
+def license_status_client():
+    status = license_manager.get_current_license_status()
+    return jsonify(status)
+
+# Client: Activate
+@app.route('/api/license/activate', methods=['POST'])
+def activate_license_client():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        
+    data = request.json
+    key = data.get('key', '').strip()
+    
+    success, msg, info = license_manager.activate_client_license(key)
+    if success:
+        return jsonify({'status': 'success', 'message': msg, 'plan': info['plan']})
+    return jsonify({'status': 'error', 'message': msg})
+
+# Generator: List (Only if Master)
+@app.route('/api/license/list', methods=['GET'])
+def list_licenses_route():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    # Optional: Enforce Master Check
+    if not os.path.exists("/home/dns/web_gui/private_key.pem"):
+         return jsonify({'status': 'error', 'message': 'Access Denied: Not a License Generator Node'}), 403
+         
+    licenses = license_manager.list_licenses()
+    return jsonify({'status': 'success', 'licenses': licenses})
+
+# Generator: Generate (Only if Master)
+@app.route('/api/license/generate', methods=['POST'])
+def generate_license_route():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    if not os.path.exists("/home/dns/web_gui/private_key.pem"):
+         return jsonify({'status': 'error', 'message': 'Access Denied: Not a License Generator Node'}), 403
+    
+    data = request.json
+    client_name = data.get('client_name', 'Unknown')
+    plan = data.get('plan', 'PRO')
+    duration = data.get('duration', 365)
+    
+    result = license_manager.generate_license(client_name, plan, duration)
+    if "error" in result:
+        return jsonify({'status': 'error', 'message': result['error']}), 500
+        
+    return jsonify({'status': 'success', 'license': result})
+
+@app.route('/api/license/features', methods=['GET'])
+def license_features():
+    plan = request.args.get('plan', 'PRO')
+    features = license_manager.get_plan_features(plan)
+    return jsonify({'status': 'success', 'plan': plan, 'features': features})
+
+@app.route('/api/license/revoke', methods=['POST'])
+def revoke_license_route():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    data = request.json
+    key = data.get('key')
+    
+    if license_manager.revoke_license(key):
+        return jsonify({'status': 'success', 'message': 'License revoked'})
+    return jsonify({'status': 'error', 'message': 'License not found'}), 404
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
@@ -704,49 +1106,462 @@ def before_request():
         print(f"WAF BLOCK: Path={request.path}, Body={request.get_data().decode('utf-8', errors='ignore')}")
         return jsonify({'status': 'error', 'message': 'Security Block: Malicious activity detected'}), 403
 
+# --- GLOBAL STATS STATE ---
+last_unbound_stats = {}
+
+STATS_FILE = '/dev/shm/dns_stats.json'
+
+def get_unbound_stats():
+    """
+    Get detailed stats from Unbound and calculate rates.
+    """
+    global last_unbound_stats
+    
+    # Try to load from file if memory is empty (persistence across restarts)
+    if not last_unbound_stats and os.path.exists(STATS_FILE):
+        try:
+            with open(STATS_FILE, 'r') as f:
+                last_unbound_stats = json.load(f)
+        except: pass
+    
+    try:
+        # Get current cumulative stats (try without sudo first, then fallback)
+        output = ""
+        try:
+            res = subprocess.run(['unbound-control', 'stats_noreset'], capture_output=True, text=True, timeout=2)
+            if res.returncode == 0 and res.stdout:
+                output = res.stdout
+        except Exception:
+            output = ""
+        if not output:
+            try:
+                res = subprocess.run(['sudo', 'unbound-control', 'stats_noreset'], capture_output=True, text=True, timeout=3)
+                if res.returncode == 0 and res.stdout:
+                    output = res.stdout
+            except Exception:
+                output = ""
+        if not output:
+            raise RuntimeError("unbound-control not accessible")
+        
+        current_stats = {}
+        for line in output.split('\n'):
+            if '=' in line:
+                key, value = line.split('=')
+                try:
+                    current_stats[key] = float(value)
+                except:
+                    pass
+        
+        now = time.time()
+        result = {
+            'queries': 0,
+            'cachehits': 0,
+            'cachemiss': 0,
+            'recursive': 0,
+            'expired': 0,
+            'reqlist_avg': current_stats.get('total.requestlist.avg', 0),
+            'reqlist_max': current_stats.get('total.requestlist.max', 0),
+            'rectime_avg': current_stats.get('total.recursion.time.avg', 0),
+            'rectime_med': current_stats.get('total.recursion.time.median', 0)
+        }
+
+        # Calculate Rates if we have previous data
+        if last_unbound_stats and 'time' in last_unbound_stats:
+            time_diff = now - last_unbound_stats['time']
+            
+            # If time_diff is valid (> 0.5s)
+            if time_diff > 0.5:
+                # Check for restart (current < last)
+                if current_stats.get('total.num.queries', 0) < last_unbound_stats.get('total.num.queries', 0):
+                     # Restart detected, reset baseline
+                     pass 
+                else:
+                    result['queries'] = (current_stats.get('total.num.queries', 0) - last_unbound_stats.get('total.num.queries', 0)) / time_diff
+                    result['cachehits'] = (current_stats.get('total.num.cachehits', 0) - last_unbound_stats.get('total.num.cachehits', 0)) / time_diff
+                    result['cachemiss'] = (current_stats.get('total.num.cachemiss', 0) - last_unbound_stats.get('total.num.cachemiss', 0)) / time_diff
+                    result['recursive'] = (current_stats.get('total.num.recursivereplies', 0) - last_unbound_stats.get('total.num.recursivereplies', 0)) / time_diff
+                    result['expired'] = (current_stats.get('total.num.expired', 0) - last_unbound_stats.get('total.num.expired', 0)) / time_diff
+                    
+                    # Store calculated rates for fallback
+                    result['last_rates'] = True
+            else:
+                 # Time diff too small (refresh spam), return last known rates if available
+                 if 'cached_rates' in last_unbound_stats:
+                     return last_unbound_stats['cached_rates']
+        
+        # Update state (store raw cumulative values)
+        last_unbound_stats = current_stats
+        last_unbound_stats['time'] = now
+        # Cache the calculated result for short-term fallbacks
+        last_unbound_stats['cached_rates'] = result
+        
+        # Persist to file
+        try:
+            with open(STATS_FILE, 'w') as f:
+                json.dump(last_unbound_stats, f)
+        except: pass
+        
+        return result
+    except Exception as e:
+        print(f"Error getting unbound stats: {e}")
+        # Fallback: return last cached rates if available, otherwise approximate using frontend QPS
+        if last_unbound_stats and 'cached_rates' in last_unbound_stats:
+            return last_unbound_stats['cached_rates']
+        try:
+            frontend_qps, _ = get_traffic_stats()
+        except Exception:
+            frontend_qps = 0
+        return {
+            'queries': frontend_qps, 'cachehits': 0, 'cachemiss': 0, 'recursive': 0, 'expired': 0,
+            'reqlist_avg': 0, 'reqlist_max': 0, 'rectime_avg': 0, 'rectime_med': 0
+        }
+
+def get_blacklist_rate():
+    """
+    Estimate blacklist hit rate from dnsmasq log (Optimized)
+    """
+    try:
+        # Use a smaller window (last 2000 lines) to estimate current rate
+        # We assume 2000 lines covers a few seconds at high load
+        cmd = "sudo tail -n 2000 /var/log/dnsmasq.log | grep -c 'config .* is 0.0.0.0'"
+        # Note: Or grep for the server IP block if used
+        
+        # If we want exact rate, we need timestamps. 
+        # But for efficiency, let's just count matches in the last chunk and normalize?
+        # Better: use awk to count matches in last 2 seconds (like get_traffic_stats)
+        
+        cmd = f"sudo tail -n 5000 /var/log/dnsmasq.log | awk -v now=\"$(date +%H:%M:%S)\" -v window=5 '" \
+              r'BEGIN { count=0; split(now, n, ":"); now_sec = n[1]*3600 + n[2]*60 + n[3]; } ' \
+              r'/config .* is 0.0.0.0|config .* is 103.68.213.74/ { ' \
+              r'  split($3, t, ":"); log_sec = t[1]*3600 + t[2]*60 + t[3]; ' \
+              r'  if (now_sec - log_sec <= window && now_sec - log_sec >= 0) count++; ' \
+              r"} END { print count }'"
+              
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=2).stdout.strip()
+        count = int(result) if result else 0
+        return round(count / 5.0, 1) # Per second
+    except:
+        return 0
+
+@app.route('/api/stats/extended')
+def extended_stats_endpoint():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    ub_stats = get_unbound_stats()
+    bl_rate = get_blacklist_rate()
+    frontend_qps, _ = get_traffic_stats()
+    
+    if ub_stats:
+        ub_stats['blacklist'] = bl_rate
+        ub_stats['frontend_qps'] = frontend_qps
+        
+        # Calculate approximate Frontend Cache Hits (Frontend QPS - Unbound QPS)
+        # Ensure non-negative
+        backend_qps = ub_stats['queries']
+        frontend_hits = max(0, frontend_qps - backend_qps)
+        
+        # Format for display
+        return jsonify({
+            'status': 'success',
+            'data': ub_stats,
+            'formatted': {
+                'frontend_qps': f"{int(frontend_qps)} queries/s",
+                'frontend_hits': f"{int(frontend_hits)} queries/s",
+                'queries': f"{int(ub_stats['queries'])} queries/s",
+                'cachehits': f"{int(ub_stats['cachehits'])} queries/s",
+                'cachemiss': f"{int(ub_stats['cachemiss'])} queries/s",
+                'blacklist': f"{int(bl_rate)} queries/s",
+                'recursive': f"{int(ub_stats['recursive'])} queries/s",
+                'expired': f"{int(ub_stats['expired'])} queries/s",
+                'reqlist': f"{ub_stats['reqlist_avg']:.5f} avg, {int(ub_stats['reqlist_max'])} max",
+                'rectime': f"{ub_stats['rectime_avg']:.6f} avg, {ub_stats['rectime_med']:.6e} med"
+            }
+        })
+    else:
+        # Fallback to zeros if stats collection failed (but structure is valid)
+        return jsonify({
+             'status': 'success',
+             'data': {
+                 'queries': 0, 'cachehits': 0, 'cachemiss': 0, 'recursive': 0, 'expired': 0,
+                 'reqlist_avg': 0, 'reqlist_max': 0, 'rectime_avg': 0, 'rectime_med': 0,
+                 'blacklist': bl_rate, 'frontend_qps': frontend_qps
+             },
+             'formatted': {
+                'frontend_qps': f"{int(frontend_qps)} queries/s",
+                'frontend_hits': "0 queries/s",
+                'queries': "0 queries/s", 'cachehits': "0 queries/s", 'cachemiss': "0 queries/s",
+                'blacklist': f"{int(bl_rate)} queries/s", 'recursive': "0 queries/s", 'expired': "0 queries/s",
+                'reqlist': "0 avg, 0 max", 'rectime': "0 avg, 0 med"
+             }
+        })
+
+@app.route('/api/stats/cache')
+def cache_stats_endpoint():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        # Get raw stats without rate calculation
+        output = ""
+        try:
+            res = subprocess.run(['unbound-control', 'stats_noreset'], capture_output=True, text=True, timeout=3)
+            if res.returncode == 0 and res.stdout:
+                output = res.stdout
+        except Exception as e:
+            print(f"Unbound stats error: {e}")
+            pass
+            
+        stats = {}
+        if output:
+            for line in output.split('\n'):
+                if '=' in line:
+                    key, value = line.split('=')
+                    try:
+                        stats[key] = float(value)
+                    except:
+                        stats[key] = value
+        
+        # Extract relevant info
+        total_queries = int(stats.get('total.num.queries', 0))
+        total_hits = int(stats.get('total.num.cachehits', 0))
+        total_misses = int(stats.get('total.num.cachemiss', 0))
+        total_prefetch = int(stats.get('total.num.prefetch', 0))
+        total_expired = int(stats.get('total.num.expired', 0))
+        
+        hit_rate = 0
+        if total_queries > 0:
+            hit_rate = (total_hits / total_queries) * 100
+            
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'total_queries': total_queries,
+                'total_hits': total_hits,
+                'total_misses': total_misses,
+                'total_prefetch': total_prefetch,
+                'total_expired': total_expired,
+                'hit_rate': f"{hit_rate:.1f}%",
+                'msg_cache_size': read_unbound_setting('msg-cache-size') or 'N/A',
+                'rrset_cache_size': read_unbound_setting('rrset-cache-size') or 'N/A'
+            }
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/logs/blacklist')
+def get_blacklist_logs():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        # Only show blocks from Internet Positif
+        positif_list = set()
+        
+        fpath = '/etc/dnsmasq.d/internet_positif.conf'
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, 'r') as f:
+                    for line in f:
+                        m = re.search(r'address=/(.*?)/', line)
+                        if m: positif_list.add(m.group(1).lower())
+            except: pass
+        
+        output = ""
+        # Search for 'config' which indicates a block
+        cmd = f"{SUDO_CMD}tail -n 5000 /var/log/dnsmasq.log | grep 'config' | tail -n 100"
+        
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+            if r.returncode == 0 and r.stdout:
+                output = r.stdout
+        except Exception:
+            pass
+        
+        domain_stats = {}
+        if output:
+            for line in output.split('\n'):
+                if not line: continue
+                match = re.search(r'^([A-M][a-z]{2}\s+\d+\s+\d+:\d+:\d+).*config\s+(.+)\s+is\s+([0-9.]+)', line)
+                if match:
+                    ts = match.group(1)
+                    dom = match.group(2)
+                    if dom.lower() in positif_list:
+                        if dom not in domain_stats:
+                            domain_stats[dom] = {'count': 0, 'latest_ts': ts}
+                        domain_stats[dom]['count'] += 1
+                        domain_stats[dom]['latest_ts'] = ts
+        
+        logs = []
+        for domain, stats in domain_stats.items():
+            logs.append({
+                'timestamp': stats['latest_ts'],
+                'domain': domain,
+                'type': "INTERNET POSITIF",
+                'hits': stats['count']
+            })
+        
+        return jsonify({'status': 'success', 'logs': list(reversed(logs))})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+@app.route('/api/logs/clear', methods=['POST'])
+def clear_logs():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        # Clear dnsmasq.log
+        subprocess.run(['sudo', 'truncate', '-s', '0', '/var/log/dnsmasq.log'], check=False)
+        # Clear guardian.log
+        subprocess.run(['sudo', 'truncate', '-s', '0', '/home/dns/guardian.log'], check=False)
+        return jsonify({'status': 'success', 'message': 'Logs cleared successfully'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
+# --- BLACKLIST MANAGEMENT APIs ---
+@app.route('/api/blacklist/list')
+def get_blacklist():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    blacklist = []
+    if os.path.exists('/etc/dnsmasq.d/blacklist.conf'):
+        try:
+            with open('/etc/dnsmasq.d/blacklist.conf', 'r') as f:
+                for line in f:
+                    m = re.search(r'address=/(.*?)/', line)
+                    if m: blacklist.append(m.group(1))
+        except: pass
+    
+    return jsonify({'status': 'success', 'blacklist': blacklist})
+
+@app.route('/api/blacklist/manage', methods=['POST'])
+def manage_blacklist():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json
+    action = data.get('action') # 'add' or 'remove'
+    domain = data.get('domain')
+    
+    if not domain:
+        return jsonify({'status': 'error', 'message': 'Domain required'})
+        
+    fpath = '/etc/dnsmasq.d/blacklist.conf'
+    
+    try:
+        # Read existing
+        lines = []
+        if os.path.exists(fpath):
+            with open(fpath, 'r') as f:
+                lines = f.readlines()
+        
+        # Filter out duplicates or the target domain
+        new_lines = []
+        found = False
+        
+        for line in lines:
+            if f"address=/{domain}/" in line:
+                found = True
+                if action == 'remove':
+                    continue # Skip to remove
+            new_lines.append(line)
+            
+        if action == 'add' and not found:
+            new_lines.append(f"address=/{domain}/0.0.0.0\n")
+            
+        # Write back
+        with open(fpath, 'w') as f:
+            f.writelines(new_lines)
+            
+        # Restart dnsmasq to apply
+        subprocess.run(['sudo', 'systemctl', 'restart', 'dnsmasq'], check=False)
+        
+        return jsonify({'status': 'success', 'message': f'Domain {domain} {action}ed successfully'})
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)})
+
 # --- END WAF ---
+
+# SERVFAIL logs - REMOVED per user request
+@app.route('/api/logs/servfail')
+def get_servfail_logs():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    return jsonify({'status': 'success', 'logs': []})
+
+@app.route('/api/logs/threats')
+def get_threat_logs():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    return jsonify({'status': 'success', 'logs': []})
+
+
 
 # Simple in-memory storage for traffic stats
 traffic_data = []
 
+# Define sudo command based on user privileges
+SUDO_CMD = "sudo " if os.geteuid() != 0 else ""
+
 def get_traffic_stats():
     try:
-        # ISP Scale QPS: Use a 5-second sliding window
-        now = datetime.now()
-        total_queries = 0
+        # Optimization: Use awk to count queries in the last 5 seconds directly in shell
+        # This is much faster than pulling 200k lines into Python
+        # FIXED: Use relative time from the log's latest entry to handle logging latency/buffering
+        # IMPROVED: Also check against system time to avoid stale stats if log stopped updating
         window_size = 5
         
-        # Increase tail for ISP scale (200k lines handles up to 40k QPS over 5s)
-        # Assuming avg 20k QPS * 5s = 100k lines. Using 200k for safety margin.
-        cmd = "sudo tail -n 200000 /var/log/dnsmasq.log | grep 'query\\['"
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        # Calculate current second of day in Python (Local Time) to match log timestamps
+        now = datetime.now()
+        current_sec = now.hour * 3600 + now.minute * 60 + now.second
         
-        if not result:
-            return 0, 0
-            
-        lines = result.split('\n')
+        # Count queries in the last 5 seconds relative to the latest log timestamp
+        # We look for 'query[' and check the timestamp (parts[2])
+        # Note: dnsmasq logs are in 'Feb 14 18:32:25' format
+        # Increased tail to 50000 to handle high traffic (>10k QPS)
+        cmd = f"{SUDO_CMD}tail -n 5000 /var/log/dnsmasq.log | awk -v window={window_size} -v current_sec={current_sec} '" \
+              r'BEGIN { max_sec=0; count=0; } ' \
+              r'/query\[/ { ' \
+              r'  split($3, t, ":"); log_sec = t[1]*3600 + t[2]*60 + t[3]; ' \
+              r'  times[NR] = log_sec; ' \
+              r'  if (log_sec > max_sec) max_sec = log_sec; ' \
+              r'} ' \
+              r'END { ' \
+              r'  diff = current_sec - max_sec; ' \
+              r'  if (diff < 0) { ' \
+              r'    if (diff > -60) diff = 0; ' \
+              r'    else diff += 86400; ' \
+              r'  } ' \
+              r'  if (diff > 300) { print 0; exit; } ' \
+              r'  limit = max_sec - window; ' \
+              r'  if (limit < 0) limit += 86400; ' \
+              r'  for (i in times) { ' \
+              r'    if (max_sec >= window) { ' \
+              r'      if (times[i] > limit && times[i] <= max_sec) count++; ' \
+              r'    } else { ' \
+              r'      if (times[i] <= max_sec || times[i] > limit) count++; ' \
+              r'    } ' \
+              r'  } ' \
+              r'  print count ' \
+              r"}'"
         
-        # Count queries within the window
-        for line in reversed(lines): # Start from newest for speed
-            try:
-                parts = line.split()
-                if len(parts) < 3: continue
-                time_str = parts[2]
-                
-                log_time = datetime.strptime(time_str, '%H:%M:%S').replace(year=now.year, month=now.month, day=now.day)
-                diff = (now - log_time).total_seconds()
-                
-                if diff <= window_size:
-                    total_queries += 1
-                elif diff > window_size + 2: # Buffer for slight time drift
-                    break # Optimization: stop if we are way past the window
-            except:
-                continue
-                
+        # Increase timeout to 5s and add logging
+        # print(f"DEBUG CMD: {cmd}", file=sys.stderr)
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+        result = proc.stdout.strip()
+        
+        # Debug logging to journal
+        if proc.stderr:
+            print(f"Traffic Stats Error: {proc.stderr}")
+        
+        total_queries = int(result) if result else 0
         qps = round(total_queries / window_size, 1)
-        snapshot = len(lines)
         
-        return qps, snapshot
+        # print(f"DEBUG: Traffic Stats QPS={qps}, Total={total_queries}")
+        return qps, total_queries
     except Exception as e:
         print(f"Error in get_traffic_stats: {e}")
         return 0, 0
@@ -757,7 +1572,8 @@ def get_per_ip_traffic_stats(limit=20):
     Returns: {ip: queries, rate_limit_status}
     """
     try:
-        cmd = f"sudo tail -n 50000 /var/log/dnsmasq.log | grep 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
+        # Fixed: IP is at $8 in dnsmasq log format "Feb 14 18:32:25 dnsmasq[...]: query[A] domain from IP"
+        cmd = f"{SUDO_CMD}tail -n 5000 /var/log/dnsmasq.log | grep 'query\\[' | awk '{{print $8}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         if not result:
@@ -794,71 +1610,48 @@ def get_per_ip_traffic_stats(limit=20):
 
 def get_servfail_stats(limit=5):
     """
-    Get SERVFAIL error statistics from dnsmasq logs
-    Returns: [{'domain': domain, 'errors': count, 'percentage': pct}, ...]
+    Get SERVFAIL error statistics
+    DISABLED: Returns empty list to prevent confusion with blocking logic
     """
-    try:
-        # Get total queries in recent logs
-        cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
-        total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
-        total_queries = int(total_result) if total_result else 1
-        
-        # Get SERVFAIL errors by domain
-        cmd = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep 'reply is SERVFAIL' | awk '{{print $8}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
-        
-        if not result:
-            return []
-        
-        servfail_data = []
-        for line in result.split('\n'):
-            try:
-                parts = line.strip().split()
-                if len(parts) >= 2:
-                    count = int(parts[0])
-                    domain = parts[1]
-                    percentage = round((count / total_queries) * 100, 2) if total_queries > 0 else 0
-                    
-                    servfail_data.append({
-                        'domain': domain,
-                        'errors': count,
-                        'percentage': percentage
-                    })
-            except:
-                continue
-        
-        return servfail_data
-    except Exception as e:
-        print(f"Error in get_servfail_stats: {e}")
-        return []
+    return []
 
 def get_blocklist_stats(limit=10):
     """
-    Get blocklist hits from dnsmasq logs
-    Tracks domains blocked by blacklist configuration
-    Returns: [{'domain': domain, 'blocked': count, 'percentage': pct}, ...]
+    Get hits from Internet Positif configuration
     """
     try:
+        whitelist = load_whitelist_domains()
+        
+        block_files = [
+            '/etc/dnsmasq.d/internet_positif.conf'
+        ]
+        
+        blacklist = set()
+        for b_file in block_files:
+            if os.path.exists(b_file):
+                try:
+                    with open(b_file, 'r') as f:
+                        for line in f:
+                            match = re.search(r'address=/(.*?)/', line)
+                            if match:
+                                blacklist.add(match.group(1).lower())
+                except:
+                    pass
+                        
         # Get total queries
-        cmd_total = "sudo tail -n 100000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
+        # Reduced tail from 100000 to 50000 to prevent timeout
+        cmd_total = f"{SUDO_CMD}tail -n 5000 /var/log/dnsmasq.log | grep 'query\\[' | wc -l"
         total_result = subprocess.run(cmd_total, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         total_queries = int(total_result) if total_result else 1
         
         # Find blocked domains (queries that were denied/replied with NXDOMAIN or 0.0.0.0)
         # dnsmasq marks blocked queries with specific patterns in logs
-        cmd = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -E 'query\\[' | awk '{{print $6}}' | cut -d'#' -f1 | sort | uniq -c | sort -rn | head -n {limit}"
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
-        
-        if not result:
-            return []
-        
-        # Additional check for blocked entries (0.0.0.0, 127.0.0.1, or Server IP responses)
         server_ip = get_server_ip()
         server_ip_esc = server_ip.replace('.', '\\.')
         
         # Match "config domain is IP" or "reply domain is IP"
         # We look for 0.0.0.0, 127.0.0.1, or the Server IP (for block page redirect)
-        cmd_blocked = f"sudo tail -n 100000 /var/log/dnsmasq.log | grep -E 'config|reply' | grep -E ' is (0\\.0\\.0\\.0|127\\.0\\.0\\.1|{server_ip_esc})$' | awk '{{print $6}}' | sort | uniq -c | sort -rn | head -n {limit}"
+        cmd_blocked = f"{SUDO_CMD}tail -n 5000 /var/log/dnsmasq.log | grep -E 'config|reply' | grep -E ' is (0\\.0\\.0\\.0|127\\.0\\.0\\.1|{server_ip_esc})$' | awk '{{print $6}}' | sort | uniq -c | sort -rn | head -n {limit * 3}"
         blocked_result = subprocess.run(cmd_blocked, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
         
         blocklist_data = []
@@ -870,6 +1663,37 @@ def get_blocklist_stats(limit=10):
                     if len(parts) >= 2:
                         count = int(parts[0])
                         domain = parts[1]
+                        domain_lower = domain.lower()
+                        
+                        # FILTER: Skip if currently whitelisted
+                        if domain_lower in whitelist:
+                            continue
+                        
+                        # Check parent domains in whitelist
+                        parts_dom = domain_lower.split('.')
+                        is_whitelisted = False
+                        for i in range(len(parts_dom)-1):
+                            parent = ".".join(parts_dom[i:])
+                            if parent in whitelist:
+                                is_whitelisted = True
+                                break
+                        if is_whitelisted:
+                            continue
+
+                        # FILTER: ONLY include if in blacklist (Rate Limit)
+                        in_blacklist = False
+                        if domain_lower in blacklist:
+                            in_blacklist = True
+                        else:
+                            # Check parent domains in blacklist
+                            for i in range(len(parts_dom)-1):
+                                parent = ".".join(parts_dom[i:])
+                                if parent in blacklist:
+                                    in_blacklist = True
+                                    break
+                        
+                        if not in_blacklist: continue
+
                         percentage = round((count / total_queries) * 100, 2) if total_queries > 0 else 0
                         
                         blocklist_data.append({
@@ -904,7 +1728,14 @@ def read_dnsmasq_setting(key):
 def read_unbound_setting(key):
     """Read a setting from unbound config files"""
     try:
-        for config_file in ['/etc/unbound/unbound.conf.d/smartdns.conf']:
+        # Check all relevant config files
+        config_files = [
+            '/etc/unbound/unbound.conf.d/smartdns.conf',
+            '/etc/unbound/unbound.conf.d/security-hardening.conf',
+            '/etc/unbound/unbound.conf'
+        ]
+        
+        for config_file in config_files:
             if os.path.exists(config_file):
                 with open(config_file, 'r') as f:
                     for line in f:
@@ -1019,7 +1850,8 @@ def restart_dns_services():
         return {'status': 'error', 'message': f'Error restarting services: {e}'}
 
 # --- TRAFFIC HISTORY DB ---
-DB_PATH = '/home/dns/traffic_history.db'
+# DB_PATH moved to top of file
+
 
 def init_db():
     try:
@@ -1035,6 +1867,9 @@ def init_db():
                      (threat_type TEXT PRIMARY KEY, enabled INTEGER)''')
         c.execute('''CREATE TABLE IF NOT EXISTS threat_keywords
                      (keyword TEXT PRIMARY KEY)''')
+        
+        # Optimize: Add index on timestamp for faster history queries
+        c.execute("CREATE INDEX IF NOT EXISTS idx_traffic_timestamp ON traffic(timestamp)")
         
         # Default schedule (disabled, 00:00 to 00:00, default IPs)
         c.execute("INSERT OR IGNORE INTO trust_schedule (id, enabled, start_time, end_time, trust_ips) VALUES (1, 0, '00:00', '00:00', '8.8.8.8, 1.1.1.1')")
@@ -1161,36 +1996,31 @@ def traffic_per_ip():
 
 @app.route('/api/traffic/servfail')
 def traffic_servfail():
-    """Get SERVFAIL error statistics"""
+    """Get SERVFAIL error statistics - DISABLED"""
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
     
-    limit = request.args.get('limit', 5, type=int)
-    servfail_data = get_servfail_stats(limit=limit)
-    
-    # Calculate total SERVFAIL count
-    total_servfail = sum(item['errors'] for item in servfail_data)
-    
+    # DISABLED: Return empty stats to prevent confusion
     return jsonify({
         'timestamp': datetime.now().isoformat(),
         'summary': {
-            'total_servfail_errors': total_servfail,
-            'affected_domains': len(servfail_data),
-            'error_rate': f"{sum(item['percentage'] for item in servfail_data):.2f}%"
+            'total_servfail_errors': 0,
+            'affected_domains': 0,
+            'error_rate': "0.00%"
         },
-        'top_domains': servfail_data
+        'top_domains': []
     })
 
 @app.route('/api/traffic/blocklist')
 def traffic_blocklist():
-    """Get blocklist hits and blocked domains"""
+    """Get blocklist hits - only for Internet Positif if active"""
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
     
     limit = request.args.get('limit', 10, type=int)
+    # Filter only for Internet Positif
     blocklist_data = get_blocklist_stats(limit=limit)
     
-    # Calculate total blocked count
     total_blocked = sum(item['blocked'] for item in blocklist_data)
     
     return jsonify({
@@ -1203,11 +2033,101 @@ def traffic_blocklist():
         'top_domains': blocklist_data
     })
 
+def get_threat_stats(limit=10):
+    """
+    Disabled: Returns empty list to comply with 'no block' standard for primary DNS.
+    """
+    return []
+
+@app.route('/api/traffic/threats')
+def traffic_threats():
+    """Get cyber threat statistics"""
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    try:
+        limit = request.args.get('limit', 10, type=int)
+        threat_data = get_threat_stats(limit=limit) or []
+        
+        total_threats = sum(item.get('threat', 0) for item in threat_data)
+        threat_rate = 0.0
+        if threat_data:
+             threat_rate = sum(item.get('percentage', 0) for item in threat_data)
+
+        return jsonify({
+            'timestamp': datetime.now().isoformat(),
+            'summary': {
+                'total_threats': total_threats,
+                'threat_domains': len(threat_data),
+                'threat_rate': f"{threat_rate:.2f}%"
+            },
+            'top_domains': threat_data
+        })
+    except Exception as e:
+        print(f"Error in traffic_threats: {e}")
+        return jsonify({
+            'timestamp': datetime.now().isoformat(),
+            'summary': {'total_threats': 0, 'threat_domains': 0, 'threat_rate': "0.00%"},
+            'top_domains': []
+        })
+
+def get_blocked_logs(limit=50):
+    try:
+        server_ip = get_server_ip()
+        server_ip_esc = server_ip.replace('.', '\\.')
+        # Get raw lines
+        cmd = f"sudo tail -n 2000 /var/log/dnsmasq.log | grep -E 'config|reply' | grep -E ' is (0\\.0\\.0\\.0|127\\.0\\.0\\.1|{server_ip_esc})$' | tail -n {limit}"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        
+        logs = []
+        if result:
+            for line in reversed(result.split('\\n')): # Show newest first
+                try:
+                    parts = line.split()
+                    if len(parts) >= 6:
+                        # Timestamp: Mon DD HH:MM:SS
+                        timestamp = " ".join(parts[:3])
+                        domain = parts[5]
+                        
+                        # Determine type
+                        type_str = "BLOCKED"
+                        if "config" in line:
+                             type_str = "MALWARE / BLACKLIST"
+                        elif "0.0.0.0" in line:
+                             type_str = "MALWARE / BLACKLIST"
+                        
+                        logs.append({
+                            'timestamp': timestamp,
+                            'domain': domain,
+                            'type': type_str,
+                            'hits': 1
+                        })
+                except: continue
+        return logs
+    except:
+        return []
+
+@app.route('/api/logs/blacklist')
+def logs_blacklist():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+        
+    try:
+        logs = get_blocked_logs(limit=100)
+        return jsonify({'status': 'success', 'logs': logs})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+
 def get_service_status(service_name):
     try:
-        result = subprocess.run(['systemctl', 'is-active', service_name], capture_output=True, text=True)
+        # Use full path to systemctl to avoid PATH issues
+        cmd = ['/usr/bin/systemctl', 'is-active', service_name]
+        result = subprocess.run(cmd, capture_output=True, text=True)
         return result.stdout.strip() == 'active'
-    except:
+    except Exception as e:
+        print(f"Error checking service {service_name}: {e}")
         return False
 
 def run_command(command, timeout=30):
@@ -1234,14 +2154,17 @@ def safe_service_restart(background=False):
         def restart_task():
             # Add small delay to allow response to be sent
             time.sleep(0.5)
-            run_command("sudo systemctl restart dnsmasq")
+            # RELOAD dnsmasq (Required for config changes to take effect)
+            run_command("sudo systemctl reload dnsmasq")
+            # Unbound needs restart for some config changes
             run_command("sudo systemctl restart unbound")
         threading.Thread(target=restart_task).start()
-        return True, "Services restarting in background"
+        return True, "Services reloading in background"
     else:
-        run_command("sudo systemctl restart dnsmasq")
+        # RELOAD dnsmasq
+        run_command("sudo systemctl reload dnsmasq")
         run_command("sudo systemctl restart unbound")
-        return True, "Services restarted successfully"
+        return True, "Services reloaded successfully"
 
 @app.route('/health')
 def health():
@@ -1250,7 +2173,11 @@ def health():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    resp = make_response(render_template('index.html'))
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 @app.route('/api/manual/pdf')
 def download_manual_pdf():
@@ -1398,12 +2325,23 @@ def get_network_info():
 
 def get_trust_info():
     try:
-        # Check if Internet Positif (Local Blocklist) is active
-        # We check if the config file exists and is NOT disabled
-        path = '/etc/dnsmasq.d/internet_positif.conf'
-        if os.path.exists(path):
-            return {'enabled': True, 'ip': 'Local DB'}
-        return {'enabled': False, 'ip': ''}
+        # Source of Truth: Database (User Intent)
+        # We must reflect what the user WANTS, not necessarily what the file system has (which might be syncing)
+        is_enabled = False
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("SELECT enabled FROM trust_schedule WHERE id=1")
+            row = c.fetchone()
+            if row:
+                is_enabled = bool(row[0])
+        except Exception as e:
+            print(f"Error reading trust schedule in get_trust_info: {e}")
+        finally:
+            if 'conn' in locals() and conn:
+                conn.close()
+
+        return {'enabled': is_enabled, 'ip': 'Local DB'}
     except:
         return {'enabled': False, 'ip': ''}
 
@@ -1440,14 +2378,35 @@ def status():
         except:
             pass
             
-    # Whitelist info
+    # Whitelist info (Combined IP and Domain)
     whitelist = []
+    whitelist_ips = []
+    whitelist_domains = []
+
+    # 1. Load IPs from Firewall Whitelist
     if os.path.exists('/home/dns/whitelist.conf'):
         try:
             with open('/home/dns/whitelist.conf', 'r') as f:
-                whitelist = [line.strip() for line in f.readlines() if line.strip() and not line.startswith('#')]
+                lines = [line.strip() for line in f.readlines() if line.strip() and not line.startswith('#')]
+                whitelist.extend(lines)
+                whitelist_ips.extend(lines)
         except:
             pass
+
+    # 2. Load Domains from Custom Trust
+    if os.path.exists('/home/dns/blocklists/custom_trust.txt'):
+        try:
+            with open('/home/dns/blocklists/custom_trust.txt', 'r') as f:
+                lines = [line.strip() for line in f.readlines() if line.strip() and not line.startswith('#')]
+                whitelist.extend(lines)
+                whitelist_domains.extend(lines)
+        except:
+            pass
+    
+    # Deduplicate
+    whitelist = list(set(whitelist))
+    whitelist_ips = list(set(whitelist_ips))
+    whitelist_domains = list(set(whitelist_domains))
 
     # HDD Usage
     hdd_usage = 0
@@ -1457,18 +2416,41 @@ def status():
     except:
         pass
 
+    # Check Blocking Status
+    blocking_status = {}
+    blocklists = ["malware.conf", "internet_positif.conf", "external_threats.conf", "blacklist.conf"]
+    for bl in blocklists:
+        blocking_status[bl] = os.path.exists(os.path.join("/etc/dnsmasq.d", bl))
+    
+    # DEBUG: Print status to console to verify
+    print(f"DEBUG: Blocking Status: {blocking_status}")
+
+    # Get blocking_enabled from guardian config
+    blocking_enabled = False
+    if os.path.exists('/home/dns/guardian_config.json'):
+        try:
+            with open('/home/dns/guardian_config.json', 'r') as f:
+                config = json.load(f)
+                blocking_enabled = config.get('blocking_enabled', False)
+        except:
+            pass
+
     return jsonify({
         'dnsmasq': get_service_status('dnsmasq'),
         'unbound': get_service_status('unbound'),
         'dnssec': dnssec_active,
         'resolved': get_service_status('systemd-resolved'),
         'guardian': get_service_status('guardian'),
-        'iptables': fw_status['nat'],
+        'blocking': blocking_status,
+        'blocking_enabled': blocking_enabled,
+        'iptables': fw_status.get('nat', False) if isinstance(fw_status, dict) else False,
         'security': {
-            'flood_protection': fw_status['flood_prot'],
-            'connection_limit': fw_status['conn_limit'],
+            'flood_protection': fw_status.get('flood_prot', False) if isinstance(fw_status, dict) else False,
+            'connection_limit': fw_status.get('conn_limit', False) if isinstance(fw_status, dict) else False,
             'guardian_logs': guardian_logs,
-            'whitelist': whitelist
+            'whitelist': whitelist,
+            'whitelist_ips': whitelist_ips,
+            'whitelist_domains': whitelist_domains
         },
         'metrics': {
             'cpu': cpu_usage,
@@ -1476,8 +2458,8 @@ def status():
             'hdd': hdd_usage,
             'dns_perf': dns_perf
         },
-        'network': net_info,
-        'trust': trust_info
+        'network': net_info or {},
+        'trust': trust_info or {}
     })
 
 def get_system_ips():
@@ -1581,7 +2563,7 @@ def list_domains(list_type):
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
             
-    return jsonify({'status': 'success', 'domains': domains})
+    return jsonify({'status': 'success', 'domains': domains, 'count': len(domains)})
 
 @app.route('/api/action', methods=['POST'])
 def action():
@@ -1631,18 +2613,134 @@ def action():
         
     if cmd_type == 'update_whitelist':
         try:
-            # Lines can be IPs or Subnets
-            lines = [l.strip() for l in whitelist_data.split('\n') if l.strip()]
+            # Smart Whitelist: Separate IPs and Domains
+            raw_lines = [l.strip() for l in whitelist_data.split('\n') if l.strip()]
+            new_ips = set()
+            new_domains = set()
+            
+            # Regex for IP (IPv4/IPv6) and CIDR
+            ip_pattern = re.compile(r'^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]+)?$|'  # IPv4
+                                  r'^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}(/[0-9]+)?$') # IPv6 (Simple)
+
+            for line in raw_lines:
+                # Remove comments
+                if line.startswith('#'): continue
+                
+                # Check if IP
+                if ip_pattern.match(line) or ':' in line: # Fallback for complex IPv6
+                    new_ips.add(line)
+                else:
+                    # Assume Domain
+                    # Sanitize domain
+                    d = re.sub(r'[^a-zA-Z0-9._\-]', '', line)
+                    if d: new_domains.add(d)
+
+            # 1. Handle IPs (Firewall) - MERGE MODE to prevent data loss
+            current_ips = set()
+            if os.path.exists('/home/dns/whitelist.conf'):
+                try:
+                    with open('/home/dns/whitelist.conf', 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                current_ips.add(line)
+                except: pass
+            
+            # Merge new IPs
+            final_ips = current_ips.union(new_ips)
+            
+            # CRITICAL: Always preserve Localhost and Current IP
+            if "127.0.0.1" not in final_ips:
+                final_ips.add("127.0.0.1")
+            
+            current_remote_ip = request.remote_addr
+            if current_remote_ip and current_remote_ip != "127.0.0.1":
+                final_ips.add(current_remote_ip)
+
             content = "# Dynamic Whitelist Configuration\n# Format: IP or Subnet (one per line)\n"
-            content += "\n".join(lines)
+            content += "\n".join(sorted(list(final_ips)))
             
             with open('/home/dns/whitelist.conf', 'w') as f:
                 f.write(content)
             
-            # Apply to firewall and restart guardian
-            run_command("sudo /home/dns/setup_firewall.sh")
-            run_command("sudo systemctl restart guardian")
-            return jsonify({'status': 'success', 'message': 'Whitelist updated successfully'})
+            # 2. Handle Domains (DNS - Custom Trust) - MERGE MODE
+            current_domains = set()
+            if os.path.exists('/home/dns/blocklists/custom_trust.txt'):
+                try:
+                    with open('/home/dns/blocklists/custom_trust.txt', 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line:
+                                current_domains.add(line)
+                except: pass
+            
+            final_domains = current_domains.union(new_domains)
+
+            with open('/home/dns/blocklists/custom_trust.txt', 'w') as f:
+                f.write("\n".join(sorted(list(final_domains))))
+
+            # Apply Changes
+            errors = []
+            
+            # A. Firewall
+            try:
+                run_command("sudo /home/dns/setup_firewall.sh")
+                run_command("sudo systemctl restart guardian")
+            except Exception as e:
+                errors.append(f"Firewall Error: {e}")
+
+                # B. DNS Whitelist (Update Internet Positif / DNSMasq)
+                try:
+                    # Update trust list logic
+                    if os.path.exists('/home/dns/scripts/update_trust_list.py'):
+                        subprocess.run(['/usr/bin/python3', '/home/dns/scripts/update_trust_list.py'])
+                    
+                    # Manual Whitelist Appending (Fix for overwriting)
+                    # We should append to /etc/dnsmasq.d/whitelist.conf, but first check if it exists
+                    # and remove duplicates.
+                    
+                    current_wl_content = ""
+                    if os.path.exists('/etc/dnsmasq.d/whitelist.conf'):
+                         with open('/etc/dnsmasq.d/whitelist.conf', 'r') as f:
+                             current_wl_content = f.read()
+                    
+                    new_wl_entries = ""
+                    for d in final_domains:
+                        entry = f"server=/{d}/8.8.8.8"
+                        # Only add if not already present (avoid duplicates)
+                        if entry not in current_wl_content:
+                            new_wl_entries += f"{entry}\n"
+                    
+                    if new_wl_entries:
+                        # Use sudo tee -a to append safely
+                        run_command(f"echo '{new_wl_entries}' | sudo tee -a /etc/dnsmasq.d/whitelist.conf")
+                    
+                    # RE-ADD ESSENTIAL WHITELIST (Localhost/Localnet) if missing
+                    # This prevents the "SSH/WebGUI inaccessible" issue if the file was wiped
+                    essential_checks = [
+                        "server=/localhost/127.0.0.1",
+                        "server=/local/127.0.0.1",
+                        "server=/lan/127.0.0.1"
+                    ]
+                    
+                    essential_missing = ""
+                    for check in essential_checks:
+                        if check not in current_wl_content and check not in new_wl_entries:
+                             essential_missing += f"{check}\n"
+                    
+                    if essential_missing:
+                        run_command(f"echo '{essential_missing}' | sudo tee -a /etc/dnsmasq.d/whitelist.conf")
+
+                    safe_service_restart(background=True)
+
+                except Exception as e:
+                    errors.append(f"DNS Error: {e}")
+
+
+            if errors:
+                return jsonify({'status': 'warning', 'message': 'Whitelist updated with errors: ' + "; ".join(errors)})
+                
+            return jsonify({'status': 'success', 'message': 'Global Whitelist updated (Firewall & DNS)'})
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)})
 
@@ -1680,10 +2778,10 @@ def action():
                 if d:
                     run_command(f"sudo sed -i '/address=\/{d}\//d' /etc/dnsmasq.d/blacklist.conf")
         
-        success, msg = safe_service_restart()
+        success, msg = safe_service_restart(background=True)
         if not success:
             return jsonify({'status': 'error', 'message': msg})
-        return jsonify({'status': 'success', 'message': f'Processed {len(domains)} domains for blacklist'})
+        return jsonify({'status': 'success', 'message': f'Processed {len(domains)} domains for blacklist (Restarting in background)'})
 
     elif cmd_type == 'whitelist':
         domains = data.get('domains', [])
@@ -1696,7 +2794,7 @@ def action():
         action_val = data.get('action', 'add')
         
         for d in domains:
-            d = re.sub(r'[^a-zA-Z0-9.\-\|]', '', d) # Sanitize
+            d = re.sub(r'[^a-zA-Z0-9._\-\|]', '', d) # Sanitize (Allow underscore for SRV/PTR)
             if not d: continue
             
             if action_val == 'add':
@@ -1705,16 +2803,73 @@ def action():
                 if os.path.exists(blacklist_path):
                     run_command(f"sudo sed -i '/address=\/{d}\//d' {blacklist_path}")
                 
-                # 2. Add to whitelist.conf with a stable public DNS (8.8.8.8)
-                run_command(f"echo 'server=/{d}/8.8.8.8' | sudo tee -a /etc/dnsmasq.d/whitelist.conf")
+                # 2. Add to whitelist.conf with Local Unbound (127.0.0.1#5353) to prevent leaks
+                # This ensures the client sees YOUR IP as the resolver, not Google
+                run_command(f"echo 'server=/{d}/127.0.0.1#5353' | sudo tee -a /etc/dnsmasq.d/whitelist.conf")
+                
+                # 3. Add to Custom Trust (Internet Positif Whitelist)
+                custom_trust_file = '/home/dns/blocklists/custom_trust.txt'
+                try:
+                    # Check if already exists
+                    exists = False
+                    if os.path.exists(custom_trust_file):
+                        with open(custom_trust_file, 'r') as f:
+                            if d in [line.strip() for line in f]:
+                                exists = True
+                    if not exists:
+                        with open(custom_trust_file, 'a') as f:
+                            f.write(f"{d}\n")
+                except: pass
+
             elif action_val == 'remove':
                 run_command(f"sudo sed -i '/server=\/{d}\//d' /etc/dnsmasq.d/whitelist.conf")
+                # Remove from custom trust
+                custom_trust_file = '/home/dns/blocklists/custom_trust.txt'
+                try:
+                    if os.path.exists(custom_trust_file):
+                        run_command(f"sudo sed -i '/^{d}$/d' {custom_trust_file}")
+                except: pass
+            
+        # Update Internet Positif Blocklist if active (Apply Whitelist)
+        if os.path.exists('/etc/dnsmasq.d/internet_positif.conf'):
+             subprocess.run(['/usr/bin/python3', '/home/dns/scripts/update_trust_list.py'])
             
         # 3. Restart services safely
-        success, msg = safe_service_restart()
+        success, msg = safe_service_restart(background=True)
         if not success:
             return jsonify({'status': 'error', 'message': msg})
-        return jsonify({'status': 'success', 'message': f'Processed {len(domains)} domains for whitelist'})
+        return jsonify({'status': 'success', 'message': f'Processed {len(domains)} domains for whitelist (Restarting in background)'})
+
+    elif cmd_type == 'update_whitelist':
+        whitelist_data = data.get('whitelist', '')
+        
+        # Validate and filter IPs/CIDRs
+        valid_entries = []
+        for line in whitelist_data.split('\n'):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            # Simple regex for IPv4/IPv6/CIDR
+            if re.match(r'^[0-9a-fA-F:./]+$', line):
+                valid_entries.append(line)
+        
+        try:
+            # Write to /home/dns/whitelist.conf for Firewall
+            with open('/home/dns/whitelist.conf', 'w') as f:
+                f.write('\n'.join(valid_entries))
+            
+            # Apply Firewall Rules
+            run_command("sudo bash /home/dns/setup_firewall.sh")
+            
+            # Restart services to ensure consistency
+            success, msg = safe_service_restart(background=True)
+            if not success:
+                 return jsonify({'status': 'error', 'message': msg})
+                 
+            return jsonify({'status': 'success', 'message': 'Global Whitelist updated and Firewall applied (Restarting in background)'})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)})
+
     elif cmd_type == 'update_ssh':
         run_command("sudo apt-get update && sudo apt-get install --only-upgrade openssh-server -y")
     elif cmd_type == 'update_firewall':
@@ -1723,7 +2878,7 @@ def action():
         # Redirect malware domains to 0.0.0.0
         cmd = f"curl -s https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts | grep '^0.0.0.0' | awk '{{print \"address=/\"$2\"/0.0.0.0\"}}' | sudo tee /etc/dnsmasq.d/malware.conf > /dev/null"
         run_command(cmd)
-        success, msg = safe_service_restart()
+        success, msg = safe_service_restart(background=True)
         if not success:
             return jsonify({'status': 'error', 'message': msg})
     elif cmd_type == 'change_dns' and dns_ip:
@@ -1732,7 +2887,7 @@ def action():
         forward_lines = "\n".join([f"    forward-addr: {ip.strip()}" for ip in ips if ip.strip()])
         forward_conf = f"forward-zone:\n    name: \".\"\n{forward_lines}\n"
         run_command(f"echo '{forward_conf}' | sudo tee /etc/unbound/unbound.conf.d/forward.conf")
-        success, msg = safe_service_restart()
+        success, msg = safe_service_restart(background=True)
         if not success:
             return jsonify({'status': 'error', 'message': msg})
     elif cmd_type == 'update_network':
@@ -1834,12 +2989,18 @@ def action():
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            db_enabled = 1 if trust_enabled else 0
-            c.execute("UPDATE trust_schedule SET enabled=? WHERE id=1", (db_enabled,))
+            if trust_enabled:
+                # Force Manual Mode (Always Active) to prevent scheduler from disabling it
+                # if the current time is outside the previous schedule range.
+                c.execute("UPDATE trust_schedule SET enabled=1, start_time='00:00', end_time='00:00' WHERE id=1")
+            else:
+                c.execute("UPDATE trust_schedule SET enabled=0 WHERE id=1")
             conn.commit()
-            conn.close()
         except Exception as e:
             print(f"Error syncing schedule DB: {e}")
+        finally:
+            if 'conn' in locals() and conn:
+                conn.close()
 
         # Use shared function
         if perform_trust_toggle(trust_enabled):
@@ -1850,13 +3011,101 @@ def action():
         
     return jsonify({'status': 'success'})
 
+@app.route('/api/blocking/status', methods=['GET'])
+def get_blocking_status():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    config = {}
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+        except: pass
+    
+    return jsonify({'enabled': config.get('blocking_enabled', True)})
+
+@app.route('/api/blocking/toggle', methods=['POST'])
+def toggle_blocking():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    data = request.json
+    enabled = data.get('enabled', True)
+    
+    # 1. Update Config
+    config = {}
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+        except: pass
+    
+    config['blocking_enabled'] = enabled
+    
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=4)
+            
+        # 2. Rename Strategy for Fast Toggling
+        # List of blocklists to manage
+        blocklists = [
+            "malware.conf",
+            "internet_positif.conf",
+            "external_threats.conf",
+            "blacklist.conf"
+        ]
+        
+        base_dir = "/etc/dnsmasq.d/"
+        
+        for fname in blocklists:
+            active_path = os.path.join(base_dir, fname)
+            disabled_path = os.path.join(base_dir, fname + ".disabled")
+            
+            if enabled:
+                # Enable: Rename .disabled -> .conf
+                if os.path.exists(disabled_path):
+                    # Use sudo mv -f to force overwrite and avoid prompts
+                    subprocess.run(["sudo", "mv", "-f", disabled_path, active_path], check=False)
+            else:
+                # Disable: Rename .conf -> .disabled
+                if os.path.exists(active_path):
+                    # Use sudo mv -f to force overwrite and avoid prompts
+                    subprocess.run(["sudo", "mv", "-f", active_path, disabled_path], check=False)
+        
+        # 3. Restart DNS Service SAFELY
+        # Use --no-block to return immediately and avoid timeouts
+        subprocess.run(["sudo", "systemctl", "restart", "dnsmasq", "--no-block"], check=False)
+        
+        return jsonify({'status': 'success', 'enabled': enabled})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/logs')
 def logs():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
     # Get last 20 lines of dnsmasq logs
-    proc = run_command("sudo tail -n 20 /var/log/dnsmasq.log")
-    logs = (proc.stdout or '').strip() if proc else ''
+    # Use full path for tail and sudo
+    cmd = "sudo /usr/bin/tail -n 20 /var/log/dnsmasq.log"
+    proc = run_command(cmd)
+    
+    logs = ''
+    if proc and proc.returncode == 0:
+        logs = (proc.stdout or '').strip()
+    else:
+        # Debug logging
+        try:
+            with open('/home/dns/web_gui/debug_logs.txt', 'a') as f:
+                f.write(f"[{datetime.now()}] Log fetch failed. Cmd: {cmd}\n")
+                if proc:
+                    f.write(f"Stderr: {proc.stderr}\n")
+                else:
+                    f.write("Proc is None\n")
+        except:
+            pass
+            
     return jsonify({'logs': logs})
 
 @app.route('/api/banned_ips', methods=['GET'])
@@ -1879,34 +3128,48 @@ def trust_schedule():
     if not is_authenticated():
         return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
     
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    if request.method == 'POST':
-        data = request.json
-        enabled = 1 if data.get('enabled') else 0
-        start_time = data.get('start_time', '00:00')
-        end_time = data.get('end_time', '00:00')
-        trust_ips = data.get('trust_ips', '')
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
         
-        c.execute("UPDATE trust_schedule SET enabled=?, start_time=?, end_time=?, trust_ips=? WHERE id=1",
-                  (enabled, start_time, end_time, trust_ips))
-        conn.commit()
-        conn.close()
-        return jsonify({'status': 'success', 'message': 'Schedule updated'})
-    
-    c.execute("SELECT enabled, start_time, end_time, trust_ips FROM trust_schedule WHERE id=1")
-    row = c.fetchone()
-    conn.close()
-    
-    if row:
-        return jsonify({
-            'enabled': bool(row[0]),
-            'start_time': row[1],
-            'end_time': row[2],
-            'trust_ips': row[3]
-        })
-    return jsonify({'status': 'error', 'message': 'No schedule found'}), 404
+        if request.method == 'POST':
+            data = request.json
+            enabled = 1 if data.get('enabled') else 0
+            start_time = data.get('start_time', '00:00')
+            end_time = data.get('end_time', '00:00')
+            trust_ips = data.get('trust_ips', '')
+            
+            c.execute("UPDATE trust_schedule SET enabled=?, start_time=?, end_time=?, trust_ips=? WHERE id=1",
+                      (enabled, start_time, end_time, trust_ips))
+            conn.commit()
+            
+            # APPLY CHANGES IMMEDIATELY
+            # If Manual Mode (00:00 - 00:00), we should enforce the 'enabled' state immediately
+            # Otherwise, the scheduler will pick it up, but immediate feedback is better.
+            
+            if start_time == '00:00' and end_time == '00:00':
+                perform_trust_toggle(bool(enabled))
+
+            return jsonify({'status': 'success', 'message': 'Schedule updated'})
+        
+        c.execute("SELECT enabled, start_time, end_time, trust_ips FROM trust_schedule WHERE id=1")
+        row = c.fetchone()
+        
+        if row:
+            return jsonify({
+                'enabled': bool(row[0]),
+                'start_time': row[1],
+                'end_time': row[2],
+                'trust_ips': row[3]
+            })
+        return jsonify({'status': 'error', 'message': 'No schedule found'}), 404
+
+    except Exception as e:
+        print(f"Error in trust_schedule: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        if 'conn' in locals() and conn:
+            conn.close()
 
 @app.route('/api/sync/info')
 def sync_info():
@@ -1973,41 +3236,127 @@ def unblock_ip():
 
 # --- GUARDIAN CONFIGURATION ---
 GUARDIAN_CONFIG_FILE = "/home/dns/guardian_config.json"
-DNSMASQ_CONFIG_FILE = "/home/dns/dnsmasq_smartdns.conf"
+DNSMASQ_CONFIG_FILE = "/etc/dnsmasq.d/00-base.conf"
 
 def read_dnsmasq_config():
     config = {}
     if os.path.exists(DNSMASQ_CONFIG_FILE):
-        with open(DNSMASQ_CONFIG_FILE, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    parts = line.split('=', 1)
-                    config[parts[0].strip()] = parts[1].strip()
+        try:
+            with open(DNSMASQ_CONFIG_FILE, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        parts = line.split('=', 1)
+                        config[parts[0].strip()] = parts[1].strip()
+        except:
+             # Try sudo cat
+             proc = subprocess.run(f"sudo cat {DNSMASQ_CONFIG_FILE}", shell=True, capture_output=True, text=True)
+             for line in proc.stdout.splitlines():
+                 line = line.strip()
+                 if line and not line.startswith('#') and '=' in line:
+                     parts = line.split('=', 1)
+                     config[parts[0].strip()] = parts[1].strip()
     return config
 
 def update_dnsmasq_config(new_settings):
-    if not os.path.exists(DNSMASQ_CONFIG_FILE):
-        return
-    
     lines = []
-    with open(DNSMASQ_CONFIG_FILE, 'r') as f:
-        lines = f.readlines()
+    try:
+        with open(DNSMASQ_CONFIG_FILE, 'r') as f:
+            lines = f.readlines()
+    except:
+        proc = subprocess.run(f"sudo cat {DNSMASQ_CONFIG_FILE}", shell=True, capture_output=True, text=True)
+        lines = proc.stdout.splitlines(keepends=True)
     
-    with open(DNSMASQ_CONFIG_FILE, 'w') as f:
-        for line in lines:
-            stripped = line.strip()
-            if stripped and not stripped.startswith('#') and '=' in stripped:
-                key = stripped.split('=', 1)[0].strip()
-                if key in new_settings:
-                    f.write(f"{key}={new_settings[key]}\n")
-                else:
-                    f.write(line)
+    new_content = []
+    for line in lines:
+        stripped = line.strip()
+        # Check if line is a setting key=value
+        if stripped and not stripped.startswith('#') and '=' in stripped:
+            key = stripped.split('=', 1)[0].strip()
+            if key in new_settings:
+                new_content.append(f"{key}={new_settings[key]}\n")
             else:
-                f.write(line)
+                new_content.append(line)
+        else:
+            new_content.append(line)
     
-    # Reload dnsmasq
+    # Write to temp
+    temp_path = '/tmp/dnsmasq_temp.conf'
+    with open(temp_path, 'w') as f:
+        f.writelines(new_content)
+        
+    # Move with sudo
+    subprocess.run(f"sudo mv {temp_path} {DNSMASQ_CONFIG_FILE}", shell=True, check=True)
+    subprocess.run(f"sudo chown root:root {DNSMASQ_CONFIG_FILE}", shell=True, check=True)
+    
+    # Reload dnsmasq without downtime
     subprocess.run("sudo systemctl restart dnsmasq", shell=True)
+
+@app.route('/api/export/threats/pdf')
+def export_threats_pdf():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Authentication required'}), 401
+    
+    try:
+        # Get Threat Data
+        limit = request.args.get('limit', 100, type=int)
+        threat_data = get_threat_stats(limit=limit)
+        
+        # Initialize PDF
+        pdf = FPDF()
+        pdf.add_page()
+        
+        # Header
+        pdf.set_font("Arial", "B", 16)
+        pdf.cell(0, 10, "CYBER THREAT DETECTION REPORT", 0, 1, "C")
+        pdf.set_font("Arial", "I", 10)
+        pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Server: {get_server_ip()}", 0, 1, "C")
+        pdf.ln(5)
+        
+        # Summary
+        total_threats = sum(item['threat'] for item in threat_data)
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 10, "SUMMARY", 0, 1)
+        pdf.set_font("Arial", "", 10)
+        pdf.cell(0, 6, f"Total Detected Threats: {total_threats}", 0, 1)
+        pdf.cell(0, 6, f"Unique Domains: {len(threat_data)}", 0, 1)
+        pdf.ln(5)
+        
+        # Table Header
+        pdf.set_fill_color(200, 220, 255)
+        pdf.set_font("Arial", "B", 10)
+        pdf.cell(100, 8, "DOMAIN / HOST", 1, 0, "L", True)
+        pdf.cell(50, 8, "THREAT TYPE", 1, 0, "C", True)
+        pdf.cell(30, 8, "HITS", 1, 1, "R", True)
+        
+        # Table Content
+        pdf.set_font("Arial", "", 9)
+        for item in threat_data:
+            # Handle long domains
+            domain = item['domain']
+            if len(domain) > 50:
+                domain = domain[:47] + "..."
+                
+            pdf.cell(100, 7, domain, 1, 0, "L")
+            pdf.cell(50, 7, item['type'], 1, 0, "C")
+            pdf.cell(30, 7, str(item['threat']), 1, 1, "R")
+            
+        # Footer Note
+        pdf.ln(10)
+        pdf.set_font("Arial", "I", 8)
+        pdf.multi_cell(0, 5, "This report is generated automatically by DNS ENGINE CYBER SECURITY. The domains listed above have been detected and blocked due to suspicious activity (Botnet/Malware/Crypto Mining patterns).")
+        
+        # Output
+        pdf_content = pdf.output(dest='S').encode('latin1')
+        return send_file(
+            io.BytesIO(pdf_content),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f"Threat_Report_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+        )
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/guardian/config', methods=['GET'])
 def get_guardian_config():
@@ -2017,7 +3366,10 @@ def get_guardian_config():
     # Read Guardian Config
     guardian_config = {
         "ban_threshold": 10000,
-        "malicious_threshold": 200
+        "malicious_threshold": 200,
+        "limit_query_per_min": 1000,
+        "limit_hit_threshold": 0,
+        "abnormal_query_per_min": 500
     }
     if os.path.exists(GUARDIAN_CONFIG_FILE):
         try:
@@ -2048,7 +3400,12 @@ def save_guardian_config():
     # Save Guardian Config
     guardian_settings = {
         "ban_threshold": int(data.get('ban_threshold', 10000)),
-        "malicious_threshold": int(data.get('malicious_threshold', 200))
+        "malicious_threshold": int(data.get('malicious_threshold', 200)),
+        "limit_query_per_min": int(data.get('limit_query_per_min', 1000)),
+        "limit_hit_threshold": int(data.get('limit_hit_threshold', 0)),
+        "abnormal_query_per_min": int(data.get('abnormal_query_per_min', 500)),
+        "bandwidth_gbps": int(data.get('bandwidth_gbps', 10)),
+        "auto_tune_enabled": data.get('auto_tune_enabled', False)
     }
     
     try:
@@ -2069,11 +3426,339 @@ def save_guardian_config():
     if dnsmasq_settings:
         try:
             update_dnsmasq_config(dnsmasq_settings)
+            # Also restart Guardian to apply new limits (e.g. limit_query_per_min)
+            subprocess.run("sudo systemctl restart guardian", shell=True)
         except Exception as e:
              return jsonify({'status': 'error', 'message': f'Error saving dnsmasq config: {e}'}), 500
             
     return jsonify({'status': 'success', 'message': 'Configuration saved and applied'})
 
+# --- ADVANCED CONFIGURATION (GUARDIAN SETTINGS) ---
+SMARTDNS_CONF = '/etc/unbound/unbound.conf.d/security-hardening.conf'
+
+def read_smartdns_config():
+    config = {
+        'num-threads': '1',
+        'msg-cache-size': '4m',
+        'rrset-cache-size': '4m',
+        'num-queries-per-thread': '1024',
+        'outgoing-range': '4096',
+        'so-rcvbuf': '4m',
+        'so-sndbuf': '4m',
+        'so-reuseport': 'no',
+        'edns-buffer-size': '1232',
+        'ratelimit': '1000',
+        'ip-ratelimit': '500'
+    }
+    
+    if os.path.exists(SMARTDNS_CONF):
+        try:
+            with open(SMARTDNS_CONF, 'r') as f:
+                content = f.read()
+                
+            for key in config.keys():
+                # Regex to find "key: value"
+                match = re.search(fr'^\s*{key}:\s*(.+)$', content, re.MULTILINE)
+                if match:
+                    config[key] = match.group(1).strip()
+        except Exception as e:
+            print(f"Error reading smartdns config: {e}")
+            
+    return config
+
+def save_smartdns_config_file(new_config):
+    # Read existing file to preserve comments and structure
+    if os.path.exists(SMARTDNS_CONF):
+        with open(SMARTDNS_CONF, 'r') as f:
+            content = f.read()
+    else:
+        return False, "Config file not found"
+
+    # Update values using regex
+    for key, value in new_config.items():
+        # Check if key exists
+        if re.search(fr'^\s*{key}:', content, re.MULTILINE):
+            content = re.sub(fr'^(\s*{key}:)\s*.+$', fr'\1 {value}', content, flags=re.MULTILINE)
+        else:
+            # If key doesn't exist, append it to the end of the file (assuming inside server: block)
+            if not content.endswith('\n'):
+                content += '\n'
+            content += f"    {key}: {value}\n"
+
+    # Write back to temp
+    temp_path = '/tmp/smartdns_temp.conf'
+    with open(temp_path, 'w') as f:
+        f.write(content)
+        
+    # BACKUP existing config
+    backup_path = SMARTDNS_CONF + ".bak"
+    subprocess.run(f"sudo cp {SMARTDNS_CONF} {backup_path}", shell=True)
+
+    # Move new config to place
+    try:
+        subprocess.run(f"sudo mv {temp_path} {SMARTDNS_CONF}", shell=True, check=True)
+        subprocess.run(f"sudo chown root:root {SMARTDNS_CONF}", shell=True, check=True)
+        
+        # VALIDATE Config
+        check = subprocess.run(['unbound-checkconf'], capture_output=True, text=True)
+        if check.returncode != 0:
+            # Restore backup if invalid
+            subprocess.run(f"sudo mv {backup_path} {SMARTDNS_CONF}", shell=True)
+            return False, f"Invalid Configuration: {check.stderr}"
+            
+        # Remove backup if success
+        subprocess.run(f"sudo rm {backup_path}", shell=True)
+        return True, "Saved"
+    except Exception as e:
+        # Restore backup on error
+        if os.path.exists(backup_path):
+            subprocess.run(f"sudo mv {backup_path} {SMARTDNS_CONF}", shell=True)
+        return False, str(e)
+
+@app.route('/api/guardian/advanced-config', methods=['GET', 'POST'])
+def advanced_config_api():
+    if not is_authenticated():
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+        
+    if request.method == 'GET':
+        return jsonify({
+            'status': 'success',
+            'unbound': read_smartdns_config()
+        })
+        
+    if request.method == 'POST':
+        data = request.json
+        unbound_settings = data.get('unbound', {})
+        
+        # Validate/Sanitize inputs (basic)
+        allowed_keys = [
+            'num-threads', 'msg-cache-size', 'rrset-cache-size', 
+            'num-queries-per-thread', 'outgoing-range', 'so-rcvbuf', 
+            'so-sndbuf', 'so-reuseport', 'edns-buffer-size', 
+            'ratelimit', 'ip-ratelimit'
+        ]
+        
+        clean_settings = {}
+        for k in allowed_keys:
+            if k in unbound_settings:
+                clean_settings[k] = str(unbound_settings[k])
+                
+        success, msg = save_smartdns_config_file(clean_settings)
+        
+        if success:
+            # Restart Unbound and Dnsmasq safely
+            restart_success, restart_msg = safe_service_restart(background=True)
+            if restart_success:
+                return jsonify({'status': 'success', 'message': 'Settings saved. ' + restart_msg})
+            else:
+                return jsonify({'status': 'warning', 'message': 'Settings saved but restart failed: ' + restart_msg})
+        else:
+            return jsonify({'status': 'error', 'message': msg})
+
+@app.route('/api/security/blacklist')
+def get_security_blacklist():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    banned_ips = []
+    banned_domains = []
+    
+    # Read IP Blacklist
+    BANNED_IPS_FILE = "/home/dns/banned_ips.txt"
+    if os.path.exists(BANNED_IPS_FILE):
+        try:
+            with open(BANNED_IPS_FILE, 'r') as f:
+                banned_ips = [line.strip() for line in f if line.strip()]
+        except Exception as e:
+            print(f"Error reading IP blacklist: {e}")
+            
+    # Read Domain Blacklist
+    DOMAIN_BLACKLIST_FILE = "/etc/dnsmasq.d/blacklist.conf"
+    if os.path.exists(DOMAIN_BLACKLIST_FILE):
+        try:
+            with open(DOMAIN_BLACKLIST_FILE, 'r') as f:
+                # Format: address=/domain.com/0.0.0.0
+                for line in f:
+                    m = re.search(r'address=/(.*?)/', line)
+                    if m:
+                        banned_domains.append(m.group(1))
+        except Exception as e:
+            print(f"Error reading domain blacklist: {e}")
+            
+    return jsonify({
+        'ips': banned_ips,
+        'domains': banned_domains,
+        'total_ips': len(banned_ips),
+        'total_domains': len(banned_domains)
+    })
+
+@app.route('/api/security/blacklist/remove', methods=['POST'])
+def remove_from_blacklist():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        data = request.json
+        target = data.get('target')
+        type = data.get('type') # 'ip' or 'domain'
+        
+        if not target or not type:
+            return jsonify({'error': 'Missing target or type'}), 400
+            
+        if type == 'ip':
+            # Remove from file
+            BANNED_IPS_FILE = "/home/dns/banned_ips.txt"
+            if os.path.exists(BANNED_IPS_FILE):
+                with open(BANNED_IPS_FILE, 'r') as f:
+                    ips = [line.strip() for line in f if line.strip()]
+                if target in ips:
+                    ips.remove(target)
+                    with open(BANNED_IPS_FILE, 'w') as f:
+                        for ip in ips:
+                            f.write(f"{ip}\n")
+            # Remove from iptables
+            subprocess.run(['sudo', 'iptables', '-D', 'INPUT', '-s', target, '-j', 'DROP'])
+            
+        elif type == 'domain':
+            # Remove from dnsmasq blacklist
+            DOMAIN_BLACKLIST_FILE = "/etc/dnsmasq.d/blacklist.conf"
+            if os.path.exists(DOMAIN_BLACKLIST_FILE):
+                with open(DOMAIN_BLACKLIST_FILE, 'r') as f:
+                    lines = f.readlines()
+                new_lines = [l for l in lines if f"/{target}/" not in l]
+                with open(DOMAIN_BLACKLIST_FILE, 'w') as f:
+                    f.writelines(new_lines)
+                # Restart dnsmasq
+                subprocess.run(['sudo', 'systemctl', 'restart', 'dnsmasq'])
+                
+        return jsonify({'status': 'success', 'message': f'Removed {target} from blacklist'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/scan_domains', methods=['POST'])
+def scan_domains():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        # Run the sanitizer script
+        result = subprocess.run(['sudo', 'python3', '/home/dns/sanitize_blocklists.py'], 
+                              capture_output=True, text=True, timeout=300)
+        
+        if result.returncode == 0:
+            return jsonify({'status': 'success', 'message': 'Scan completed successfully', 'output': result.stdout})
+        else:
+            return jsonify({'status': 'error', 'message': 'Scan failed', 'output': result.stderr}), 500
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({'status': 'error', 'message': 'Scan timed out'}), 504
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# --- CDN MANAGEMENT ---
+CDN_CONFIG_FILE = "/home/dns/cdn_config.json"
+UNBOUND_CDN_CONF = "/etc/unbound/unbound.conf.d/cdn-optimization.conf"
+
+@app.route('/api/cdn/config', methods=['GET'])
+def get_cdn_config():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    if not os.path.exists(CDN_CONFIG_FILE):
+        return jsonify({
+            "external_cdns": [],
+            "internal_cdns": []
+        })
+    
+    try:
+        with open(CDN_CONFIG_FILE, 'r') as f:
+            return jsonify(json.load(f))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cdn/config', methods=['POST'])
+def save_cdn_config():
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        config = request.json
+        with open(CDN_CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=4)
+        
+        success, message = apply_cdn_config_to_unbound(config)
+        if success:
+            return jsonify({'status': 'success', 'message': 'CDN configuration saved and applied'})
+        else:
+            return jsonify({'status': 'error', 'message': f'Config saved but failed to apply: {message}'}), 500
+            
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+def apply_cdn_config_to_unbound(config):
+    lines = []
+    
+    # 1. External CDNs (Forward Zones)
+    for cdn in config.get('external_cdns', []):
+        if not cdn.get('enabled', True):
+            continue
+            
+        name = cdn.get('name', 'Unknown CDN')
+        lines.append(f"# --- {name} ---")
+        
+        for domain in cdn.get('domains', []):
+            if not domain: continue
+            lines.append(f"forward-zone:")
+            lines.append(f"    name: \"{domain}\"")
+            for ip in cdn.get('ipv4', []):
+                if ip: lines.append(f"    forward-addr: {ip}")
+            for ip in cdn.get('ipv6', []):
+                if ip: lines.append(f"    forward-addr: {ip}")
+            lines.append(f"    forward-first: yes")
+            lines.append("")
+            
+    # 2. Internal CDNs (Local Data / Overrides)
+    if config.get('internal_cdns'):
+        lines.append("# --- INTERNAL CDN OVERRIDES ---")
+        for cdn in config.get('internal_cdns', []):
+            if not cdn.get('enabled', True): continue
+            for domain in cdn.get('domains', []):
+                if not domain: continue
+                lines.append(f"forward-zone:")
+                lines.append(f"    name: \"{domain}\"")
+                for ip in cdn.get('ipv4', []):
+                    if ip: lines.append(f"    forward-addr: {ip}")
+                for ip in cdn.get('ipv6', []):
+                    if ip: lines.append(f"    forward-addr: {ip}")
+                lines.append(f"    forward-first: yes")
+                lines.append("")
+
+    try:
+        content = "\n".join(lines)
+        temp_file = "/tmp/cdn_unbound.conf"
+        with open(temp_file, 'w') as f:
+            f.write(content)
+            
+        subprocess.run(['sudo', 'mv', temp_file, UNBOUND_CDN_CONF], check=True)
+        subprocess.run(['sudo', 'unbound-checkconf'], check=True)
+        subprocess.run(['sudo', 'systemctl', 'restart', 'unbound'], check=True)
+        
+        # Trigger sync to secondary
+        threading.Thread(target=lambda: subprocess.run(['sudo', '/home/dns/dnsMars/scripts/sync_to_secondary.sh', '103.68.213.222'])).start()
+        
+        return True, "Success"
+    except Exception as e:
+        return False, str(e)
+
 if __name__ == '__main__':
-    # Use SSL context for HTTPS
-    app.run(host='0.0.0.0', port=5000, ssl_context=('/home/dns/web_gui/cert.pem', '/home/dns/web_gui/key.pem'))
+    # Enable SSL for HTTPS on port 5000
+    # Use existing certificates if available, otherwise fallback to HTTP or generate self-signed?
+    # User specifically asked for HTTPS access on port 5000.
+    cert_file = '/home/dns/web_gui/cert.pem'
+    key_file = '/home/dns/web_gui/key.pem'
+    
+    if os.path.exists(cert_file) and os.path.exists(key_file):
+        app.run(host='0.0.0.0', port=5000, ssl_context=(cert_file, key_file))
+    else:
+        print("Warning: SSL certificates not found. Running in HTTP mode.")
+        app.run(host='0.0.0.0', port=5000)

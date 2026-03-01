@@ -28,21 +28,28 @@ download_convert() {
         sed "s|^local=/|address=/|; s|/$|/$SERVER_IP|" > "$output"
 }
 
+# Function to download raw domain list and convert to dnsmasq format
+# Usage: download_convert_raw "URL" "OUTPUT_FILE"
+download_convert_raw() {
+    local url="$1"
+    local output="$2"
+    echo "Downloading Raw List $url..."
+    curl -s "$url" | \
+        sed '/^#/d; /^$/d' | \
+        awk "{print \"address=/\"\$0\"/$SERVER_IP\"}" > "$output"
+}
+
 # --- 1. DOWNLOAD RAW LISTS ---
 echo "[$(date)] Downloading lists..."
 
-# Download Malware (Hagezi Pro)
-download_convert "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/dnsmasq/pro.txt" "/tmp/malware_raw"
-
-# Download Gambling
-download_convert "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/dnsmasq/gambling.txt" "/tmp/gambling_raw"
-
-# Download NSFW
-download_convert "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/dnsmasq/nsfw.txt" "/tmp/nsfw_raw"
+# Download Kominfo Mirror (Alsyundawy TrustPositif) - EXCLUSIVE SOURCE
+# Only download from Kominfo Mirror as requested
+download_convert_raw "https://raw.githubusercontent.com/alsyundawy/TrustPositif/main/alsyundawy_porn.txt" "/tmp/porn_kominfo"
+download_convert_raw "https://raw.githubusercontent.com/alsyundawy/TrustPositif/main/gambling_indonesia.txt" "/tmp/gambling_kominfo"
 
 # --- 2. PREPARE PORN/GAMBLING LIST ---
-echo "[$(date)] Merging and sorting Porn/Gambling list..."
-cat "/tmp/gambling_raw" "/tmp/nsfw_raw" | sort | uniq > "/tmp/porn_raw_merged"
+echo "[$(date)] Merging and sorting Porn/Gambling list (Kominfo Only)..."
+cat "/tmp/porn_kominfo" "/tmp/gambling_kominfo" | sort | uniq > "/tmp/porn_raw_merged"
 
 # --- 2.5 FILTER OUT WHITELIST DOMAINS (PORN) ---
 WHITELIST_FILE="/home/dns/dnsMars/whitelist_domains.txt"
@@ -64,32 +71,9 @@ else
 fi
 
 # --- 3. PREPARE MALWARE LIST (REMOVE OVERLAPS) ---
-echo "[$(date)] Processing Malware list (removing overlaps)..."
-sort "/tmp/malware_raw" | uniq > "/tmp/malware_sorted"
-
-# Comm -23: Lines in malware_sorted but NOT in porn_sorted
-# This ensures Malware list does NOT contain any domain present in the Porn list
-comm -23 "/tmp/malware_sorted" "/tmp/porn_sorted" > "/tmp/malware_no_porn"
-
-# --- 3.5 FILTER OUT WHITELIST DOMAINS (MALWARE) ---
-# Critical step to prevent False Positive Block Pages on Android/Xiaomi/Vivo/Oppo
-if [ -f "$WHITELIST_FILE" ]; then
-    echo "[$(date)] Applying whitelist filter to Malware list..."
-    
-    # Re-use cleaned whitelist if available, else regenerate
-    if [ ! -f "/tmp/whitelist_clean" ]; then
-        sed '/^#/d; /^$/d' "$WHITELIST_FILE" > "/tmp/whitelist_clean"
-    fi
-    
-    if [ -s "/tmp/whitelist_clean" ]; then
-        grep -v -F -f "/tmp/whitelist_clean" "/tmp/malware_no_porn" > "/tmp/malware_final"
-        rm -f "/tmp/whitelist_clean"
-    else
-        mv "/tmp/malware_no_porn" "/tmp/malware_final"
-    fi
-else
-    mv "/tmp/malware_no_porn" "/tmp/malware_final"
-fi
+# SKIP MALWARE LIST AS REQUESTED (ONLY TRUSTPOSITIF)
+echo "[$(date)] Skipping Malware list (Only TrustPositif requested)..."
+touch "/tmp/malware_final" # Create empty file to skip malware update
 
 # --- 4. DEPLOY MALWARE LIST ---
 if [ -s "/tmp/malware_final" ]; then
@@ -120,8 +104,7 @@ else
 fi
 
 # --- 6. CLEANUP & RESTART ---
-rm -f /tmp/malware_raw /tmp/malware_sorted /tmp/malware_final
-rm -f /tmp/gambling_raw /tmp/nsfw_raw /tmp/porn_sorted
+rm -f /tmp/porn_kominfo /tmp/gambling_kominfo /tmp/porn_raw_merged /tmp/malware_final
 
 # Safety: Remove any stray .disabled files in active directory to prevent ghost blocks
 rm -f /etc/dnsmasq.d/*.disabled

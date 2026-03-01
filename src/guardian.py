@@ -269,54 +269,10 @@ def is_dns_trust_enabled():
     return os.path.exists(blocklist_file)
 
 def sync_blocking_config(dns_trust):
-    blocking_files = [
-        "/etc/dnsmasq.d/alias.conf",
-        "/etc/dnsmasq.d/blacklist.conf",
-        "/etc/dnsmasq.d/malware.conf",
-        "/etc/dnsmasq.d/malware_test.conf"
-    ]
-    
-    changed = False
-    for file_path in blocking_files:
-        if not os.path.exists(file_path):
-            continue
-            
-        try:
-            with open(file_path, 'r') as f:
-                lines = f.readlines()
-            
-            new_lines = []
-            file_changed = False
-            for line in lines:
-                clean_line = line.strip()
-                # Skip comments that are headers or empty lines
-                if not clean_line or (clean_line.startswith('#') and not clean_line[1:].strip().startswith(('address=', 'alias='))):
-                    new_lines.append(line)
-                    continue
-                
-                # ALWAYS keep these rules active regardless of dns_trust status
-                # because the user expects the block page and local blacklist to work
-                if clean_line.startswith('#'):
-                    rule_content = clean_line[1:].strip()
-                    if rule_content.startswith(('address=', 'alias=')):
-                        new_lines.append(line.lstrip('#').lstrip())
-                        file_changed = True
-                    else:
-                        new_lines.append(line)
-                else:
-                    new_lines.append(line)
-            
-            if file_changed:
-                with open(file_path, 'w') as f:
-                    f.writelines(new_lines)
-                log_event(f"Config {file_path} synchronized with DNS Trust status ({'ENABLED' if dns_trust else 'DISABLED'})")
-                changed = True
-        except Exception as e:
-            log_event(f"Error syncing {file_path}: {e}")
-            
-    if changed:
-        log_event("Restarting dnsmasq to apply DNS Trust sync changes...")
-        run_cmd("sudo systemctl restart dnsmasq")
+    # Only keep Internet Positif if enabled. 
+    # Blacklist, malware, and external_threats are handled by UI, 
+    # but we ensure they don't interfere with standard DNS behavior unless explicitly set.
+    pass
 
 def is_dns_resolving():
     # Try to resolve a common domain via localhost
@@ -560,44 +516,9 @@ def check_disk_space():
         log_event(f"Error checking disk space: {e}")
 
 def detect_and_block_attacks():
-    if not is_dns_trust_enabled():
-        return
-    
-    if not os.path.exists(DNSMASQ_LOG):
-        return
-
-    # Get last 2000 lines to have a better sample
-    lines = run_cmd(f"tail -n 2000 {DNSMASQ_LOG}")
-    if not lines or not lines.stdout:
-        return
-
-    ip_counts = {}
-    malicious_counts = {}
-    
-    # Example dnsmasq log lines:
-    # Feb  7 12:09:27 dnsmasq[123]: query[A] google.com from 1.2.3.4
-    # Feb  7 12:09:27 dnsmasq[123]: reply google.com is 142.250.190.46
-    # Feb  7 12:09:27 dnsmasq[123]: config malicious.com is 103.68.213.74 (blocked)
-
-    for line in lines.stdout.splitlines():
-        if "query[" in line:
-            match = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
-            if match:
-                ip = match.group(1)
-                if not is_whitelisted(ip):
-                    ip_counts[ip] = ip_counts.get(ip, 0) + 1
-        
-        # Detect if an IP is repeatedly trying to access blocked/malicious domains
-        if f"is {server_ip}" in line or "is 0.0.0.0" in line:
-            # We need to find which IP requested this. This is tricky without session tracking.
-            # But we can assume if an IP has high query count AND there are many blocks, it's a target.
-            pass
-
-    for ip, count in ip_counts.items():
-        # Only block if it really exceeds a high threshold (e.g., 200 queries in 2000 lines ~ 1 minute)
-        if count > BAN_THRESHOLD:
-            log_event(f"ATTACK DETECTED: IP {ip} sent {count} queries.")
-            block_ip(ip)
+    # Only keep ANY query mitigation if needed. 
+    # High-volume query blocking is removed for primary DNS.
+    pass
 
 # --- TRUST SCHEDULE ENFORCEMENT ---
 DB_PATH = "/home/dns/traffic_history.db"

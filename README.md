@@ -15,23 +15,23 @@ Sistem ini menggunakan arsitektur **Hybrid DNS High Performance** yang menggabun
 
 ---
 
-### 2. DNS TRUST & INTERNET POSITIF
-Fitur ini dirancang untuk mematuhi regulasi pemblokiran konten negatif (Internet Positif) dengan pengalaman pengguna yang mulus.
+### 2. DNS TRUST & INTERNET POSITIF (REFINED)
+Fitur ini dirancang untuk mematuhi regulasi pemblokiran konten negatif (Internet Positif) dengan kebijakan yang lebih ketat namun tetap menjaga kenyamanan pengguna.
 
-- **HTTPS Redirect:** Sistem kini mendukung redirect otomatis dari akses HTTPS ke domain terblokir menuju halaman blokir HTTP (via 302 Redirect) setelah user melewati peringatan SSL.
-- **Cara Kerja:** Sistem secara otomatis mencegat trafik DNS dan HTTP/HTTPS melalui firewall (NAT) untuk mengarahkan domain terblokir ke halaman peringatan internal.
-- **Konfigurasi Utama:** `/etc/dnsmasq.d/smartdns.conf` (Single Source of Truth).
-- **Status:** Jika DNS Trust "Enabled", pemblokiran aktif. Jika "Disabled", sistem tetap melakukan intersepsi namun dengan aturan yang lebih longgar.
-- **Guardian:** Layanan `guardian.py` memastikan aturan firewall tetap aktif meskipun sistem direstart.
+- **Kebijakan Pemblokiran:** Sistem kini HANYA memblokir domain yang termasuk dalam kategori **Internet Positif** (Pornografi & Perjudian) dan serangan **QUERY ANY**. Semua domain produktif dan infrastruktur (Google, Apple, Microsoft, dll) dilindungi agar tidak terblokir.
+- **HTTPS Redirect:** Sistem mendukung redirect otomatis dari akses HTTPS ke domain terblokir menuju halaman blokir HTTP (via 302 Redirect) setelah user melewati peringatan SSL.
+- **Cara Kerja:** Sistem mencegat trafik DNS dan HTTP/HTTPS melalui firewall (NAT) untuk mengarahkan domain terblokir ke halaman peringatan internal.
+- **Konfigurasi Utama:** `/etc/dnsmasq.d/internet_positif.conf` (Database Hagezi Cleaned).
+- **Pembersihan Otomatis:** Script `sanitize_blocklists.py` secara rutin membersihkan daftar blokir dari domain resmi dan infrastruktur global untuk mencegah *false positive*.
+- **Guardian:** Layanan `guardian.py` memastikan aturan firewall dan kesehatan servis tetap terjaga.
 
 #### Captive Portal Bypass (False Positive Fix)
-Untuk mencegah perangkat (Android/iOS) mendeteksi jaringan sebagai "Captive Portal" palsu yang menyebabkan popup "Sign in to network" muncul terus-menerus:
+Untuk mencegah perangkat (Android/iOS) mendeteksi jaringan sebagai "Captive Portal" palsu:
 
-- **Mechanism:** Whitelisting domain connectivity check (misal: `connectivitycheck.gstatic.com`, `android.clients.google.com`) agar resolve ke IP asli via Unbound, bukan ke IP Block Page.
-- **Firewall Policy:** Intersepsi agresif port 80/443 di Firewall telah **dinonaktifkan**. Redirect ke halaman blokir HANYA terjadi jika DNS meresolve domain ke IP Server. Trafik HTTP/HTTPS normal ke internet tidak lagi dibelokkan paksa.
-- **Config:** `/home/dns/dnsMars/whitelist_domains.txt`
-- **Domains Covered:** Android (Google), iOS (Apple), Windows, Firefox, **Infinix, Asus, Sony, Motorola, LG**.
-- **Benefit:** User tidak akan melihat halaman blokir Internet Positif saat baru terkoneksi ke WiFi, kecuali mereka benar-benar mengakses konten terlarang.
+- **Mechanism:** Whitelisting domain connectivity check (misal: `connectivitycheck.gstatic.com`, `android.clients.google.com`) agar resolve ke IP asli via Unbound.
+- **Firewall Policy:** Intersepsi agresif port 80/443 di Firewall telah **dinonaktifkan**. Redirect ke halaman blokir HANYA terjadi jika DNS meresolve domain ke IP Server.
+- **Config:** `/home/dns/whitelist_domains.txt` & `/home/dns/blocklists/custom_trust.txt`.
+- **Benefit:** User tidak akan melihat halaman blokir saat baru terkoneksi ke WiFi, kecuali mereka benar-benar mengakses konten terlarang.
 
 ---
 
@@ -51,12 +51,12 @@ Guardian System kini dilengkapi dengan **Emergency Disk Protection** untuk mence
 Sistem kini dilengkapi dengan kernel tuning dan monitoring aktif untuk menangani ancaman kestabilan:
 
 - **Anti-Looping:** Dnsmasq dan Unbound dikonfigurasi untuk mendeteksi DNS forwarding loops.
+- **Proteksi QUERY ANY:** Sistem secara otomatis memblokir paket **QUERY ANY** (DNS Amplification) di level firewall (iptables) untuk mencegah server DNS digunakan sebagai sumber DDoS.
 - **Memory Leak & Swap Thrashing:** 
     - Guardian memantau penggunaan RAM dan Swap.
-    - Jika RAM > 90% dan Swap penuh (Thrashing), layanan DNS akan direstart otomatis untuk membebaskan memori sebelum sistem hang (OOM).
+    - Jika RAM > 90% dan Swap penuh (Thrashing), layanan DNS akan direstart otomatis.
 - **UDP Drop Prevention:** 
     - Kernel buffer (`rmem_default`, `rmem_max`) ditingkatkan hingga 16MB untuk mencegah paket loss saat traffic tinggi.
-- **IRQ Overload:** Menggunakan `irqbalance` untuk mendistribusikan beban interupsi jaringan ke semua core CPU.
 - **Botnet Mitigation:** Rate limit per-IP (20.000 QPS) mencegah satu botnet yang terinfeksi melumpuhkan seluruh server.
 
 ---
@@ -89,7 +89,40 @@ Sistem kini dilengkapi dengan mode pemantauan layar penuh yang adaptif:
 
 ---
 
-### 6. BATASAN PERFORMA (ISP SCALE LIMITS)
+### 6. LICENSE GENERATOR & PLAN MANAGEMENT (NEW)
+Sistem ini kini berfungsi sebagai **License Generator Center**. Web GUI memungkinkan Anda untuk membuat dan mengelola lisensi untuk klien Anda secara mandiri.
+
+#### Fitur Utama:
+- **Create License:** Membuat lisensi baru dengan parameter:
+  - **Client Name:** Nama identitas klien.
+  - **Plan Type:** BASIC, PRO, atau ENTERPRISE.
+  - **Duration:** 1 Bulan, 1 Tahun, 2 Tahun, atau Lifetime.
+- **Manage Licenses:** Melihat daftar lisensi aktif, tanggal kadaluarsa, dan opsi untuk mencabut (revoke) lisensi.
+- **Local Database:** Semua data lisensi disimpan aman secara lokal di server ini (`licenses_db.json`).
+
+#### Detail Paket (Plan Matrix):
+1. **BASIC (Standard)**
+   - Core DNS Filtering (Ads & Malware)
+   - Standard DNS Caching
+   - Basic Web GUI Access
+   - Local Logs Only
+
+2. **PRO (Full Features)**
+   - **Advanced Threat Detection** (Botnet/Crypto)
+   - Full Traffic Analysis & Charts
+   - API Access
+   - Priority Support
+   - Unlimited Custom Whitelists
+
+3. **ENTERPRISE (Multi-node)**
+   - **High Availability Clustering** (Primary-Secondary Sync)
+   - Unlimited RPS Optimization (ISP Scale)
+   - Custom Branding / White-label
+   - Multi-Node Central Management
+
+---
+
+### 7. BATASAN PERFORMA (ISP SCALE LIMITS)
 Sistem telah dikonfigurasi ulang untuk menangani topologi NAT dimana satu IP Public mewakili ribuan user:
 
 - **Global Rate Limit:** **100.000 QPS** (Perlindungan level server).
@@ -104,16 +137,15 @@ Sistem telah dikonfigurasi ulang untuk menangani topologi NAT dimana satu IP Pub
 - **Malware Shield:** Menggunakan database `/etc/dnsmasq.d/malware.conf` yang diperbarui secara berkala untuk memblokir situs berbahaya.
 
 ---
-
-### 8. PEMELIHARAAN (MAINTENANCE)
+### 8. PEMELIHARAAN & SELF-HEALING (GUARDIAN)
 - **Log System:** Sistem secara otomatis melakukan rotasi log untuk mencegah kepenuhan disk.
 - **Intelligent Self-Healing:** 
-    - `guardian.py` secara aktif memonitor port DNS (53/UDP) dan Web GUI (5000/TCP).
-    - Jika layanan macet atau mati, Guardian akan mencoba melakukan restart otomatis dan memperbaiki konfigurasi yang korup.
-    - Mendeteksi perubahan IP Network dan secara otomatis memperbarui aturan Firewall tanpa downtime.
+    - `guardian.py` secara aktif memonitor port DNS (53/UDP), Unbound (5353/UDP), dan Web GUI (5000/TCP).
+    - Jika layanan macet atau mati, Guardian akan melakukan restart otomatis dan memperbaiki konfigurasi yang korup.
+    - **Pencegahan False Positive:** Guardian tidak lagi memblokir domain secara otomatis berdasarkan frekuensi query untuk menghindari pemblokiran layanan resmi (seperti Google/YouTube).
+    - Mendeteksi perubahan IP Network dan memperbarui aturan Firewall tanpa downtime.
 
 ---
-
 ### 9. TROUBLESHOOTING WEB GUI
 Jika Web GUI tidak dapat diakses:
 
@@ -125,5 +157,10 @@ Jika Web GUI tidak dapat diakses:
 6. **Password default:** `admin` (segera ganti setelah login pertama)
 
 ---
-*Dokumen ini diperbarui secara otomatis oleh System Assistant.*
+### 10. KONTAK & DUKUNGAN
+Sistem ini dikelola oleh tim teknis PT Mars Data Telekomunikasi. Untuk bantuan lebih lanjut, silakan hubungi tim administrator.
+
+---
+*Dokumen ini diperbarui secara manual untuk mencerminkan kebijakan pemblokiran terbaru (QUERY ANY & Internet Positif).*
+*Terakhir diperbarui: 2 Maret 2026*
 *© 2026 PT MARS DATA TELEKOMUNIKASI*

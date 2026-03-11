@@ -1,4 +1,4 @@
-Update 13 March 2026 00:15 #FINAL-OPTIMIZED-SPLIT
+Update 13 March 2026 00:20 #FINAL-OPTIMIZED-SPLIT-READY
 
 # BUKU PANDUAN SISTEM - PT MARS DATA TELEKOMUNIKASI
 ## DNS ENGINE CYBER SECURITY (ISP SCALE EDITION)
@@ -39,76 +39,118 @@ chmod +x install.sh
 
 ---
 
-### 📋 SPESIFIKASI SISTEM (MINIMUM REQUIREMENTS)
-Untuk performa optimal skala ISP, disarankan menggunakan spesifikasi berikut:
+### 📄 KONTEN AUTO-INSTALLER SCRIPTS
 
-- **Operating System:** Ubuntu 22.04 LTS (Jammy Jellyfish) - *Recommended*
-- **CPU:** Minimum 4 Core (High Frequency) / 16 Core untuk skala 100k+ user.
-- **RAM:** Minimum 4GB (DDR4/DDR5) / 16GB+ untuk caching masif.
-- **Disk:** 40GB SSD/NVMe (untuk logging & caching).
-- **Network:** 1Gbps / 10Gbps NIC dengan dukungan Multi-queue.
-- **Virtualization:** Support Proxmox (LXC/VM), KVM, atau Bare Metal.
+#### 1. install_dns.sh (DNS Engine Only)
+```bash
+#!/bin/bash
+# Target: DNS Node (Primary/Secondary)
+set -e
+INSTALL_DIR="/home/dns"
+echo "🚀 Installing DNS Mars Engine..."
+sudo apt-get update
+sudo apt-get install -y dnsmasq unbound python3 python3-psutil iptables-persistent curl git re2c
+sudo mkdir -p $INSTALL_DIR/system_config_backup
+sudo chown -R $USER:$USER $INSTALL_DIR
+echo "⚙️ Applying Optimized DNS Configs..."
+sudo cp system_config_backup/dnsmasq/*.conf /etc/dnsmasq.d/
+sudo cp system_config_backup/unbound/*.conf /etc/unbound/unbound.conf.d/
+echo "⚡ Applying Kernel Optimizations..."
+sudo chmod +x optimize_dns_100gbps.sh
+sudo ./optimize_dns_100gbps.sh
+echo "🛡️ Setting up Guardian Service..."
+sudo tee /etc/systemd/system/guardian.service <<EOF
+[Unit]
+Description=Intelligent DNS Guardian
+After=network.target dnsmasq.service unbound.service
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR
+ExecStart=/usr/bin/python3 $INSTALL_DIR/guardian.py
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable dnsmasq unbound guardian
+sudo systemctl restart dnsmasq unbound guardian
+echo "✅ DNS Engine Installation Complete!"
+```
+
+#### 2. install_gui.sh (Web Management Only)
+```bash
+#!/bin/bash
+# Target: Management Node
+set -e
+INSTALL_DIR="/home/dns"
+echo "🚀 Installing DNS Mars Management Web GUI..."
+sudo apt-get update
+sudo apt-get install -y python3 python3-pip sqlite3 curl openssl git rsync sshpass
+pip3 install flask requests psutil
+sudo mkdir -p $INSTALL_DIR/web_gui
+sudo chown -R $USER:$USER $INSTALL_DIR
+echo "📂 Setting up Web GUI and Monitoring scripts..."
+if [ ! -f "$INSTALL_DIR/web_gui/cert.pem" ]; then
+    openssl req -x509 -newkey rsa:4096 -keyout $INSTALL_DIR/web_gui/key.pem -out $INSTALL_DIR/web_gui/cert.pem \
+            -days 365 -nodes -subj "/C=ID/ST=Jakarta/L=Jakarta/O=MarsData/CN=dns.mdnet.co.id"
+fi
+echo "🔄 Setting up Systemd services..."
+create_service() {
+    local name=$1
+    local description=$2
+    local exec=$3
+    sudo tee /etc/systemd/system/$name.service <<EOF
+[Unit]
+Description=$description
+After=network.target
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$exec
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+create_service "dnsmars-alarm" "DNS Mars Alarm System" "/usr/bin/python3 $INSTALL_DIR/alarm_system.py"
+create_service "dnsmars-traffic" "DNS Mars Traffic Collector" "/usr/bin/python3 $INSTALL_DIR/traffic_collector.py"
+create_service "dnsmars-gui" "DNS Mars Management Web GUI" "/usr/bin/python3 $INSTALL_DIR/web_gui/app.py"
+sudo systemctl daemon-reload
+sudo systemctl enable dnsmars-alarm dnsmars-traffic dnsmars-gui
+sudo systemctl restart dnsmars-alarm dnsmars-traffic dnsmars-gui
+echo "-------------------------------------------------------"
+echo "🎉 Management GUI Installation Complete!"
+echo "🌐 Web GUI: https://\$(curl -s ifconfig.me):5000"
+echo "-------------------------------------------------------"
+```
+
+---
+
+### 📋 SPESIFIKASI SISTEM (MINIMUM REQUIREMENTS)
+- **Operating System:** Ubuntu 22.04 LTS (Jammy Jellyfish)
+- **CPU:** Minimum 4 Core / 16 Core untuk 100k+ user.
+- **RAM:** Minimum 4GB / 16GB+ untuk caching masif.
+- **Disk:** 40GB SSD/NVMe.
+- **Network:** 1Gbps / 10Gbps NIC.
 
 ---
 
 ### 1. RINGKASAN SISTEM
-Sistem ini menggunakan arsitektur **Hybrid DNS High Performance** yang menggabungkan kecepatan **dnsmasq** dengan keamanan serta rekursi tingkat tinggi dari **Unbound**.
-
-- **DNS Engine:** Hybrid (dnsmasq + Unbound) - Tuned for High Concurrency.
-- **Security:** Anti-DDoS (iptables Hashlimit), Malware Shield (100k+ domains), Intelligent Self-Healing Guardian.
-- **Web GUI:** Management Dashboard berbasis Flask dengan antarmuka modern dan responsif.
-- **Topologi:** Mendukung **NAT Topology** (Ribuan user dibalik satu IP Public) dengan manajemen koneksi yang efisien.
+Sistem Hybrid DNS (dnsmasq + Unbound) yang di-tuning untuk ISP Scale dengan fitur Anti-DDoS, Malware Shield, dan Web Management Dashboard.
 
 ---
 
 ### 2. FITUR UNGGULAN TERBARU (UPDATE 2026)
-#### 🛡️ DNS Security & Anti-Flood
-- **ANY Query Block:** Menolak query tipe `ANY` secara otomatis untuk mencegah *DNS Amplification Attack*.
-- **Rate Limiting:** Perlindungan hingga **90.000 QPS** dengan deteksi flood otomatis (Threshold: 5000 QPS).
-- **Loop Prevention:** Deteksi dan pemutusan otomatis rantai *DNS Looping* internal.
-
-#### ⚡ Performance Optimization
-- **Multithreading Unbound:** Optimalisasi penggunaan semua core CPU (Up to 16 threads).
-- **Smart Caching:** Fitur *Prefetch* dan *Serve-Expired* untuk jawaban DNS instan tanpa menunggu internet.
-- **UDP Buffer Tuning:** Kernel buffer ditingkatkan hingga 16MB untuk mencegah *packet drop* pada trafik tinggi.
-
-#### 📊 Advanced Monitoring
-- **QPS Smoothing:** Grafik trafik yang lebih halus dan akurat, tahan terhadap *log rotation spikes*.
-- **Hardware Health:** Monitoring real-time CPU, RAM, Load Average, dan HDD.
-- **Telegram Alarm:** Notifikasi otomatis ke Telegram jika terjadi anomali trafik atau kegagalan sistem.
+- **🛡️ Security:** ANY Query Block, Rate Limiting (90k QPS), Loop Prevention.
+- **⚡ Performance:** Multithreading Unbound, Smart Caching, UDP Buffer Tuning.
+- **📊 Monitoring:** QPS Smoothing, Hardware Health, Telegram Alarm.
 
 ---
 
-### 3. DNS TRUST & INTERNET POSITIF
-Fitur ini dirancang untuk mematuhi regulasi pemblokiran konten negatif (Internet Positif) dengan pengalaman pengguna yang mulus.
-
-- **HTTPS Redirect:** Mendukung redirect otomatis dari akses HTTPS ke domain terblokir (via 302 Redirect).
-- **Captive Portal Bypass:** Whitelisting otomatis untuk domain *connectivity check* (Google, Apple, Windows) agar perangkat tidak mendeteksi jaringan sebagai "Captive Portal" palsu.
-
----
-
-### 4. PROTEKSI DISK & SELF-HEALING
-- **Emergency Disk Protection:** Pembersihan log otomatis jika penggunaan disk mencapai **90%**.
-- **Guardian System:** Memantau port DNS (53) dan GUI (5000) secara aktif. Jika layanan mati, Guardian akan melakukan restart otomatis.
-- **Log Rotation:** Menggunakan metode `copytruncate` yang aman untuk pengumpulan data statistik tanpa memutus aliran log.
-
----
-
-### 5. LICENSE & PLAN MANAGEMENT
-Sistem kini dilengkapi dengan **License Generator Center**:
-- **BASIC:** Core Filtering & Caching.
-- **PRO:** Advanced Threat Detection & Full Analytics.
-- **ENTERPRISE:** High Availability Clustering (Primary-Secondary Sync) & ISP Scale RPS.
-
----
-
-### 6. TROUBLESHOOTING & MAINTENANCE
-- **Web GUI:** Akses via `https://IP_SERVER:5000` (Gunakan HTTPS).
-- **Restart All Services:** `sudo systemctl restart dnsmasq unbound dnsmars-alarm dnsmars-traffic dnsmars-gui`
-- **Check Logs:** `tail -f /var/log/dnsmasq.log` atau via Dashboard.
-
----
-
-*Terakhir Diperbarui: 13 Maret 2026 00:15*
+*Terakhir Diperbarui: 13 Maret 2026 00:20*
 *Oleh: DNS Mars System Assistant*
 *© 2026 PT MARS DATA TELEKOMUNIKASI*

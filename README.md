@@ -160,7 +160,9 @@ Jika Web GUI tidak dapat diakses:
 6. **Password default:** `admin` (segera ganti setelah login pertama)
 
 ### 10. Auto install
-# git clone https://github.com/solinos-utab/dnsMars
+---
+git clone https://github.com/solinos-utab/dnsMars
+---
 cd dnsMars
 chmod +x install.sh
 ./install.sh

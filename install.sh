@@ -1,90 +1,106 @@
 #!/bin/bash
 
-# --- DNS Mars Data Telekomunikasi - Auto Installer ---
-# Author: DNS Guardian AI
-# Description: Automated setup for DNS, Firewall, Web GUI, and Guardian Service.
+# --- DNS Mars Data Telekomunikasi - Auto Installer (v2.0) ---
+# Description: Automated setup for DNS Hybrid (dnsmasq + Unbound), 
+#              Traffic Monitoring, Alarm System, and Web GUI.
 
 set -e # Exit on error
 
-echo "🚀 Starting DNS Mars Auto-Installation..."
+# Configuration
+INSTALL_DIR="/home/dns"
+GIT_REPO="https://github.com/solinos-utab/dnsMars"
+
+echo "🚀 Starting DNS Mars Auto-Installation on Ubuntu 22.04..."
 
 # 1. Update & Install Dependencies
 echo "📦 Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y dnsmasq unbound python3 python3-pip python3-psutil iptables-persistent curl git re2c
+sudo apt-get install -y dnsmasq unbound python3 python3-pip python3-psutil \
+                        iptables-persistent curl git re2c sshpass sqlite3
+
+# Install Python requirements
+pip3 install flask requests psutil
 
 # 2. Setup Directory Structure
 echo "📂 Setting up directories..."
-mkdir -p /home/dns/web_gui/static/img
-mkdir -p /home/dns/web_gui/templates
+sudo mkdir -p $INSTALL_DIR
+sudo chown $USER:$USER $INSTALL_DIR
+cd $INSTALL_DIR
 
-# 3. Configure DNS (dnsmasq & unbound)
-echo "⚙️ Configuring DNS services..."
-# Move local configs to system directories
-sudo cp /home/dns/dnsmasq_base.conf /etc/dnsmasq.d/00-base.conf
-if [ ! -f /etc/dnsmasq.d/upstream.conf ]; then
-    echo -e "server=8.8.8.8\nserver=1.1.1.1" | sudo tee /etc/dnsmasq.d/upstream.conf
+# 3. Download Source (If not already present)
+if [ ! -d "$INSTALL_DIR/.git" ]; then
+    echo "📥 Cloning repository..."
+    git clone $GIT_REPO .
 fi
-sudo cp /home/dns/unbound_smartdns.conf /etc/unbound/unbound.conf.d/smartdns.conf
 
-# 4. Setup Firewall
-echo "🛡️ Configuring Firewall (Anti-DDoS & ACL)..."
-sudo chmod +x /home/dns/setup_firewall.sh
-sudo /home/dns/setup_firewall.sh
+# 4. Configure DNS Services
+echo "⚙️ Configuring DNS (dnsmasq + Unbound)..."
 
-# 5. Generate SSL Certificates (Self-signed)
+# Copy dnsmasq configs
+sudo cp system_config_backup/dnsmasq/*.conf /etc/dnsmasq.d/
+# Copy unbound configs
+sudo cp system_config_backup/unbound/*.conf /etc/unbound/unbound.conf.d/
+
+# Enable IPv4 forwarding for NAT topology
+echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+
+# 5. Initialize Database (Dummy/Empty)
+echo "🗄️ Initializing system databases..."
+if [ ! -f "brand_settings.db" ]; then
+    sqlite3 brand_settings.db "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);"
+    # User will need to fill this via WebGUI or manually
+fi
+
+# 6. Setup SSL Certificates
 echo "🔐 Generating SSL certificates for Web GUI..."
-if [ ! -f /home/dns/web_gui/cert.pem ]; then
-    openssl req -x509 -newkey rsa:4096 -keyout /home/dns/web_gui/key.pem -out /home/dns/web_gui/cert.pem -days 365 -nodes -subj "/C=ID/ST=Jakarta/L=Jakarta/O=MarsData/OU=IT/CN=dns.mdnet.co.id"
+mkdir -p web_gui
+if [ ! -f "web_gui/cert.pem" ]; then
+    openssl req -x509 -newkey rsa:4096 -keyout web_gui/key.pem -out web_gui/cert.pem \
+            -days 365 -nodes -subj "/C=ID/ST=Jakarta/L=Jakarta/O=MarsData/CN=dns.mdnet.co.id"
 fi
 
-# 6. Setup Systemd Services
-echo "🔄 Setting up Systemd services..."
+# 7. Install Systemd Services
+echo "🔄 Installing Systemd services..."
 
-# Guardian Service
-sudo tee /etc/systemd/system/guardian.service <<EOF
+# Service Template Helper
+create_service() {
+    local name=$1
+    local description=$2
+    local exec=$3
+    sudo tee /etc/systemd/system/$name.service <<EOF
 [Unit]
-Description=Intelligent DNS Guardian & Self-Healing Service
+Description=$description
 After=network.target dnsmasq.service unbound.service
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/home/dns
-ExecStart=/usr/bin/python3 /home/dns/guardian.py
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$exec
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
+}
 
-# Web GUI Service
-sudo tee /etc/systemd/system/dnsmars-gui.service <<EOF
-[Unit]
-Description=DNS Mars Web Management GUI
-After=network.target
+# DNS Alarm System
+create_service "dnsmars-alarm" "DNS Mars Alarm System" "/usr/bin/python3 $INSTALL_DIR/alarm_system.py"
+# Traffic Collector (Primary)
+create_service "dnsmars-traffic" "DNS Mars Traffic Collector" "/usr/bin/python3 $INSTALL_DIR/traffic_collector.py"
+# Web GUI
+create_service "dnsmars-gui" "DNS Mars Management Web GUI" "/usr/bin/python3 $INSTALL_DIR/web_gui/app.py"
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/home/dns
-ExecStart=/usr/bin/python3 /home/dns/web_gui/app.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# 7. Enable & Start Services
-echo "✅ Enabling and starting services..."
+# 8. Enable & Start Services
+echo "✅ Finalizing installation..."
 sudo systemctl daemon-reload
-sudo systemctl enable dnsmasq unbound guardian dnsmars-gui
-sudo systemctl restart dnsmasq unbound guardian dnsmars-gui
+sudo systemctl enable dnsmasq unbound dnsmars-alarm dnsmars-traffic dnsmars-gui
+sudo systemctl restart dnsmasq unbound dnsmars-alarm dnsmars-traffic dnsmars-gui
 
 echo "-------------------------------------------------------"
 echo "🎉 Installation Complete!"
 echo "🌐 Web GUI: https://$(curl -s ifconfig.me):5000"
-echo "🔒 Access: Restricted to whitelisted IPs in setup_firewall.sh"
+echo "⚠️  Important: Update SSH credentials in brand_settings.db via WebGUI."
 echo "-------------------------------------------------------"

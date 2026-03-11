@@ -1,4 +1,4 @@
-Update 12 March 2026 23:55 #FINAL-OPTIMIZED
+Update 13 March 2026 00:15 #FINAL-OPTIMIZED-SPLIT
 
 # BUKU PANDUAN SISTEM - PT MARS DATA TELEKOMUNIKASI
 ## DNS ENGINE CYBER SECURITY (ISP SCALE EDITION)
@@ -7,9 +7,29 @@ Dokumentasi ini berisi panduan operasional dan teknis untuk sistem DNS Mars Data
 
 ---
 
-### 🚀 QUICK INSTALLATION (AUTO-INSTALL)
-Untuk instalasi cepat pada sistem **Ubuntu 22.04 LTS (Fresh Install)**, jalankan perintah berikut:
+### 🚀 OPSI INSTALASI TERPISAH (V2.1)
+Kini Anda dapat menginstal **Mesin DNS** dan **Web Management GUI** pada VM yang berbeda untuk skalabilitas yang lebih baik.
 
+#### OPSI A: Instalasi MESIN DNS SAJA (Untuk Node DNS Primary/Secondary)
+Gunakan opsi ini jika Anda hanya ingin menginstal mesin DNS yang sudah di-tuning performanya.
+```bash
+git clone https://github.com/solinos-utab/dnsMars
+cd dnsMars
+chmod +x install_dns.sh
+./install_dns.sh
+```
+
+#### OPSI B: Instalasi WEB MANAGEMENT GUI SAJA (Untuk Monitoring Center)
+Gunakan opsi ini jika Anda ingin menginstal dashboard monitoring, sistem alarm, dan pengumpul data di VM terpisah.
+```bash
+git clone https://github.com/solinos-utab/dnsMars
+cd dnsMars
+chmod +x install_gui.sh
+./install_gui.sh
+```
+
+#### OPSI C: Instalasi FULL (Mesin DNS + Web GUI)
+Jika Anda ingin menginstal semua komponen dalam satu VM yang sama.
 ```bash
 git clone https://github.com/solinos-utab/dnsMars
 cd dnsMars
@@ -64,7 +84,6 @@ Fitur ini dirancang untuk mematuhi regulasi pemblokiran konten negatif (Internet
 
 - **HTTPS Redirect:** Mendukung redirect otomatis dari akses HTTPS ke domain terblokir (via 302 Redirect).
 - **Captive Portal Bypass:** Whitelisting otomatis untuk domain *connectivity check* (Google, Apple, Windows) agar perangkat tidak mendeteksi jaringan sebagai "Captive Portal" palsu.
-- **Config:** `/home/dns/whitelist_domains.txt`
 
 ---
 
@@ -90,6 +109,6 @@ Sistem kini dilengkapi dengan **License Generator Center**:
 
 ---
 
-*Terakhir Diperbarui: 12 Maret 2026 23:55*
+*Terakhir Diperbarui: 13 Maret 2026 00:15*
 *Oleh: DNS Mars System Assistant*
 *© 2026 PT MARS DATA TELEKOMUNIKASI*
